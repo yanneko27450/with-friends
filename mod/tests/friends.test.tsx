@@ -897,6 +897,8 @@ test('複製邀請碼：朋友還沒裝 → 口語訊息＋請 Claude 跑 claude
   expect(forClaude).toContain(SOURCE_URL)
   expect(forClaude.indexOf(SOURCE_URL)).toBeLessThan(forClaude.indexOf('marketplace add'))
   expect(text).toMatch(/local conversation[^\n]*not a cloud session/)
+  // 裝好後 pane 自己跳出（ui-11），加入那行貼進 pane，不用多打指令（主人 10-12 f227fc83）
+  expect(lines[lines.indexOf(joinLine) - 1]).toMatch(/pane opens on the right by itself\. Paste this line into the box/)
   expect(w.toasts.at(-1)).toContain('install steps copied')
 })
 
@@ -909,6 +911,7 @@ test('複製邀請碼：英文介面選「附中文安裝步驟」→ 中文訊�
   expect(text).toContain('請幫我安裝')
   expect(text).toContain(SOURCE_URL)
   expect(text).toMatch(/「本機」對話[^\n]*不要選雲端/)
+  expect(text).toMatch(/右邊會自己跳出 Friends with Claude 的框，把這一行貼進框裡/)
   expect(w.toasts.at(-1)).toBe(STRINGS.en.copiedWithSteps)
 })
 

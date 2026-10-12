@@ -109,7 +109,7 @@
     <ul class="zh">
       <li>官方中繼（就是這頁的網址）由這個專案的開發者管理；群組如果用的是別人自己架的中繼，管理的就是那個人。</li>
       <li>管理者看得到群組裡每個人的名字、在不在線、分類、時間和 IP；對話內容看不到，因為沒傳上來。</li>
-      <li>伺服器和外掛的程式隨時可能更新。不過這種外掛預設不會自動更新，要你自己跑更新指令才會換新版，所以不會在你不知道的時候變掉；每次更新都等於再相信一次管理者當時放上去的版本。</li>
+      <li>伺服器和外掛的程式隨時可能更新。外掛的自動更新預設是關的：加入群組時會問你一次要不要開，不開的話要你自己按更新才會換新版；開了的話，新版會在背景自己裝上、不再問你。不管哪種，每次更新都等於再相信一次管理者當時放上去的版本（原始碼和每一版的紀錄在 GitHub，見 SECURITY.md）。</li>
       <li>邀請那一行請不要轉傳。拿到的人都能加入，外掛裡也還沒有踢人的按鈕；建立者可以打 <code class="in">/friends rotate</code> 換邀請碼，但只擋得住之後的人。</li>
       <li>還沒請專業的人做資安檢查，所以現在只找熟的朋友試用。</li>
       <li>「刪掉」是從資料庫刪除；Cloudflare 的時間回溯功能在 30 天內還能還原。</li>
@@ -117,7 +117,7 @@
     <ul class="en">
       <li>The official relay (this page's address) is run by the project's developer. If your group uses a relay someone set up themselves, that person runs it.</li>
       <li>The operator can see each member's name, online status, category, timing and IP address. Not your conversations, because they're never sent.</li>
-      <li>The server and the plugin can be updated at any time. Plugins like this don't auto-update by default, though, so yours only changes when you run the update command. Each update means trusting what the operator has published at that moment.</li>
+      <li>The server and the plugin can be updated at any time. Auto-update is off by default: when you join a group the plugin asks once whether to turn it on. If you don't, yours only changes when you press Update; if you do, new versions install in the background without asking. Either way, each update means trusting what the operator has published at that moment (the source and every version are on GitHub, see SECURITY.md).</li>
       <li>Please don't forward the invite line. Anyone who has it can join, and the plugin has no kick button yet. The creator can type <code class="in">/friends rotate</code> for a new invite, but that only stops people who haven't joined.</li>
       <li>No professional security review yet. That's why it's only being tried with close friends for now.</li>
       <li>"Deleted" means removed from the database. Cloudflare's point-in-time recovery can still restore it for 30 days.</li>

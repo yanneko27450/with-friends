@@ -897,6 +897,11 @@ test('複製邀請碼：朋友還沒裝 → 口語訊息＋請 Claude 跑 claude
   expect(forClaude).toContain(SOURCE_URL)
   expect(forClaude.indexOf(SOURCE_URL)).toBeLessThan(forClaude.indexOf('marketplace add'))
   expect(text).toMatch(/local conversation[^\n]*not a cloud session/)
+  // web-1（0.3.4）：只用 Chat 的人先別裝，寫在第 1 步之前
+  const needLine = lines.findIndex(l => l.includes('Claude Code on a computer'))
+  expect(needLine).toBeGreaterThan(-1)
+  expect(needLine).toBeLessThan(lines.findIndex(l => l.startsWith('1. ')))
+  expect(lines[needLine]).toMatch(/only use Chat[^\n]*wait for the web version/)
   // 裝好後 pane 自己跳出（ui-11），加入那行貼進 pane，不用多打指令（主人 10-12 f227fc83）
   expect(lines[lines.indexOf(joinLine) - 1]).toMatch(/pane opens on the right by itself\. Paste this line into the box/)
   expect(w.toasts.at(-1)).toContain('install steps copied')
@@ -911,6 +916,7 @@ test('複製邀請碼：英文介面選「附中文安裝步驟」→ 中文訊�
   expect(text).toContain('請幫我安裝')
   expect(text).toContain(SOURCE_URL)
   expect(text).toMatch(/「本機」對話[^\n]*不要選雲端/)
+  expect(text).toMatch(/需要電腦上的 Claude Code[^\n]*只用 Chat[^\n]*等網頁版。\n1\. /)
   expect(text).toMatch(/右邊會自己跳出 Friends with Claude 的框，把這一行貼進框裡/)
   expect(w.toasts.at(-1)).toBe(STRINGS.en.copiedWithSteps)
 })

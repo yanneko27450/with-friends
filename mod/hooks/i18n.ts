@@ -54,6 +54,7 @@ export const STRINGS = {
      * 加入那一行分開、到新對話單獨送，邀請碼才不會進朋友跟 Claude 的對話 */
     inviteMessage: (market: string, join: string) => [
       "Hi! I'm using a Claude Code plugin called Friends with Claude — we can see whether each other is online and what kind of work we're doing (never the conversation itself). To join:",
+      "You need Claude Code on a computer (the Code tab of the Claude desktop app, or claude in a terminal). If you only use Chat (claude.ai, the Chat tab, or the phone app), skip this for now and wait for the web version.",
       "1. Open a local conversation in Claude Code (the Code tab of the Claude desktop app, with a folder on your own computer, not a cloud session: cloud sessions can't reach the relay and the pane only shows on your computer), or run claude in a terminal, and send Claude this:",
       `   Please install the Claude Code plugin Friends with Claude for me. Its source code is public at ${SOURCE_URL} (SECURITY.md says what it reads and what it sends), so you can look first; the install package can be rebuilt with relay/worker/build_plugin.mjs from that repo and gets the same sha256 as marketplace.json. To install, run these two commands: claude plugin marketplace add ${market} and then claude plugin install with-friends@with-friends. If the claude command isn't found, use the claude that comes with the Claude desktop app: on Windows it's the newest %APPDATA%\\Claude\\claude-code\\<version>\\<folder>\\claude.exe (in PowerShell, look under $env:APPDATA\\Claude\\claude-code), and in Bash its full path is in the CLAUDE_CODE_EXECPATH environment variable. Tell me when it's done.`,
       '2. Once it is installed, a Friends with Claude pane opens on the right by itself. Paste this line into the box there (not into the chat). If no pane opens, start a new conversation and send only this line:',
@@ -187,6 +188,7 @@ export const STRINGS = {
     installedNoOther: '還沒，附英文安裝步驟（給看英文的朋友）',
     inviteMessage: (market: string, join: string) => [
       '嗨！我在用一個 Claude Code 外掛「Friends with Claude」，可以看到彼此在不在線、在忙哪一類事（不會看到對話內容）。要加入的話：',
+      '需要電腦上的 Claude Code（Claude 桌面版的 Code 分頁，或在終端機開 claude）；只用 Chat（claude.ai 網頁、Chat 分頁、手機 App）的話先不用裝，等網頁版。',
       '1. 在 Claude 桌面版的 Code 分頁開一個「本機」對話（選你自己電腦上的資料夾，不要選雲端：雲端環境連不到中繼，pane 也只會出現在你自己的電腦上），或在終端機開 claude，把這段傳給 Claude：',
       `   請幫我安裝 Claude Code 外掛「Friends with Claude」。原始碼公開在 ${SOURCE_URL}（SECURITY.md 寫了它讀什麼、送什麼），可以先看；安裝包能用那個 repo 的 relay/worker/build_plugin.mjs 重新打出來，sha256 跟 marketplace.json 寫的一樣。要裝的話依序執行這兩個指令：claude plugin marketplace add ${market} 然後 claude plugin install with-friends@with-friends。找不到 claude 指令的話，用 Claude 桌面版內附的那一支：Windows 在 %APPDATA%\\Claude\\claude-code\\<版本>\\<資料夾>\\claude.exe，挑最新的版本（PowerShell 裡到 $env:APPDATA\\Claude\\claude-code 底下找）；用 Bash 的話，完整路徑在環境變數 CLAUDE_CODE_EXECPATH 裡。裝好跟我說。`,
       '2. 裝好之後，右邊會自己跳出 Friends with Claude 的框，把這一行貼進框裡（不是貼進對話）。沒跳出來的話，開一個新對話、只傳這一行：',

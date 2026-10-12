@@ -1,0 +1,12 @@
+{
+  "name": "friends-status-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "test": "node ../test.mjs --base http://127.0.0.1:8787"
+  },
+  "devDependencies": {
+    "wrangler": "4.141.0"
+  }
+}

@@ -1,0 +1,27 @@
+# Rebuild the install package on Linux and compare its sha256 with the live marketplace.json.
+# Anyone can run it (Actions tab → verify-build → Run workflow) or read the log of the last run.
+name: verify-build
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.0'
+      - name: Build from this commit
+        run: node relay/worker/build_plugin.mjs --out ./check
+      - name: Compare with the live marketplace
+        run: |
+          built=$(sha256sum check/*.zip | cut -d' ' -f1)
+          ver=$(node -p "require('./mod/.claude-plugin/plugin.json').version")
+          live=$(curl -fsS https://friends-status-relay.friends-status-relay.workers.dev/marketplace.json)
+          live_ver=$(echo "$live" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).plugins[0].version))")
+          live_sha=$(echo "$live" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).plugins[0].source.sha256))")
+          echo "this commit: $ver $built"
+          echo "live:        $live_ver $live_sha"
+          if [ "$ver" != "$live_ver" ]; then echo "different version (not deployed yet, or an older commit)"; exit 0; fi
+          [ "$built" = "$live_sha" ] && echo "MATCH" || { echo "MISMATCH"; exit 1; }

@@ -1,0 +1,13 @@
+// Claude 好友動態中繼（Worker 版）。部署前要問主人（對外、用主人的 Cloudflare 帳號）
+{
+  "name": "friends-status-relay",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-09-01",
+  // 外掛安裝檔（build_plugin.mjs 產生）：/marketplace.json 與 zip；路徑對到檔案就直接回檔，其餘照舊進中繼
+  "assets": { "directory": "./public" },
+  "durable_objects": {
+    "bindings": [{ "name": "GROUP", "class_name": "Group" }]
+  },
+  // 免費方案只能用 SQLite 版 Durable Object
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Group"] }]
+}

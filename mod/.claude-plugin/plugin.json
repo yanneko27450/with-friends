@@ -1,0 +1,6 @@
+{
+  "name": "with-friends",
+  "version": "0.3.3",
+  "description": "See which friends are online and what kind of work they are doing with Claude, in a side pane. Shares only two category codes, never your conversation.",
+  "types": "./types/index.d.ts"
+}

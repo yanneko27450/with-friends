@@ -8,7 +8,7 @@ they are doing with Claude (for example "fixing bugs · website"). It never shar
 ## How it works
 
 - Your prompt is turned into two codes from a fixed list (`mod/hooks/taxonomy.ts`) on your side.
-  Only the codes, your chosen display name and online state go to a small relay server.
+  Only the codes, your chosen display name, online state and the plugin's version number go to a small relay server.
 - The relay keeps a group of up to 10 people. Activity codes are deleted after 24 hours.
 - Full details, with pointers to the code: **[SECURITY.md](SECURITY.md)**.
 
@@ -53,7 +53,7 @@ This is a third-party plugin, not an Anthropic product. MIT licensed, see [LICEN
 
 Claude Code 外掛：在側邊 pane 看到朋友在不在線、正在用 Claude 做**哪一類**事（例如「修 bug · 網站」），不會分享對話內容。
 
-- 你送出的訊息會在你這邊被分成固定清單裡的兩個代碼（`mod/hooks/taxonomy.ts`），只有代碼、你取的名字和在線狀態會送到中繼。
+- 你送出的訊息會在你這邊被分成固定清單裡的兩個代碼（`mod/hooks/taxonomy.ts`），只有代碼、你取的名字、在線狀態和外掛版本號會送到中繼。
 - 一個群組最多 10 人，動態 24 小時後刪除。
 - 讀了什麼、送了什麼、跑了什麼，每一條都附程式碼位置：**[SECURITY.md](SECURITY.md)**（英文）。
 

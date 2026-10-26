@@ -11,6 +11,8 @@ export type Friend = {
   subject: string
   activityAgoSec: number | null
   seenAgoSec: number
+  /** 對方外掛的版本（ui-19f ②）；舊版外掛、網頁成員沒有 */
+  version?: string
 }
 
 export type Membership = {
@@ -20,6 +22,8 @@ export type Membership = {
   memberId: string
   memberKey: string
   invite: string
+  /** 中繼核發邀請碼的單調世代；舊 store 沒有時視為 0 */
+  inviteGeneration: number
   isOwner: boolean
   name: string
 }
@@ -42,6 +46,7 @@ export type StatusBody = {
   action?: string
   subject?: string
   paused?: true
+  version?: string
 }
 
 export type Net ={ isOk: boolean; error: string; at: number }
@@ -49,7 +54,10 @@ export type Net ={ isOk: boolean; error: string; at: number }
 export type GroupView = { name: string; invite: string; isOwner: boolean; relay: string }
 
 /** 外掛更新（ui-19）：latest＝中繼上比自己新的版本（沒有＝''）；state＝這個對話裡更新跑到哪 */
-export type UpdateView = { latest: string; state: 'idle' | 'running' | 'done' | 'failed' }
+export type UpdateView = { latest: string; state: 'idle' | 'running' | 'done' | 'failed' | 'busy' }
+
+/** 版本紀錄小框框（ui-28）：開著嗎（約 10 秒後自動收起，每個對話各自的）；version＝使用者挑的版本（ui-29），沒挑就是自己目前的版本 */
+export type WhatsNewView = { isOpen: boolean; version?: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -60,6 +68,7 @@ declare module 'claude-code' {
       group: GroupView | null
       lang: 'en' | 'zh-TW'
       update: UpdateView
+      whatsNew: WhatsNewView
     }
   }
 }

@@ -10,9 +10,10 @@ please open an issue.
 |---|---|---|
 | The relay your invite points to (default `https://friends-status-relay.friends-status-relay.workers.dev`) | The display name you choose (free text, up to 20 characters) and, when you create a group, the group name (up to 30) | `mod/hooks/register.tsx`: `relayCall(... '/groups', { name })`, `relayCall(... '/join', { invite, name })`; `relay/core.mjs` `cleanName` |
 | The relay | Your status every 10–60 s while Claude Code is open: `state` (working / idle / offline), a random per-conversation id `conn`, `paused`, and, when it changes, `action` + `subject` | `statusBody()` in `mod/hooks/register.tsx` |
+| The relay | The plugin's version number (`version`, for example `0.4.0`), once per conversation, so friends can see who is on an old version. The relay only accepts digits in the form x.y.z | `isVersionSent` in `tick()`; `relay/core.mjs` `VERSION_RE` |
 | The relay | `action` and `subject` are always codes from a fixed list, for example `fixing-bugs` + `website`. Never your words | `mod/hooks/taxonomy.ts`; `classifyActivity()` returns `other` unless the model's answer is in the list |
 | The relay | Timing: the relay sees when each turn starts and ends (working / idle), to the second, and your IP address | `turn.start` / `turn.complete` handlers |
-| The marketplace URL you installed from | A GET of `marketplace.json` each time a conversation starts, to see whether a newer version exists. This happens even if you are not in a group, and there is no switch to turn it off | `checkUpdate()`, `updateOnStart()` |
+| The marketplace URL you installed from | A GET of `marketplace.json` each time a conversation starts, to see whether a newer version exists. This happens even if you are not in a group, and there is no switch to turn it off | `checkUpdate()`, `autoUpdateCheck()` |
 
 Apart from the two names above, nothing the plugin sends is free text. The relay also rejects
 activity that is not in the code list (`relay/core.mjs`, `status()`), so an older or modified plugin
@@ -79,9 +80,32 @@ without asking you**, and it could be different code from this repository. Nothi
 - Each member's display name and a SHA-256 hash of their key (never the key itself), and the group name
 - When each member was last seen (`seenAt`), and per-conversation online state
 - The last activity codes, deleted after 24 hours
+- The plugin version each member last reported (x.y.z), until they leave
 - Leaving deletes your record; when the last person leaves, the group is deleted.
   If you remove the plugin without `/friends leave`, your name and key hash stay until you leave or the group is deleted.
 - "Deleted" means removed from the database; the hosting provider (Cloudflare) can restore data for up to 30 days.
+
+## The web version (opening the relay address in a browser)
+
+The relay address itself serves a small web page (`relay/worker/app/`), so a friend who only uses
+Claude in a browser or on a phone can still see the group. Opening an invite link (`https://relay#code`)
+fills in the invite; the part after `#` is never sent to the server by the browser. The page removes it
+from the address bar right away, but your browser history still has the full link.
+
+- It sends only: the name you type (once, when joining), and every 15 s while the page is visible
+  (60 s in a background tab) `state: idle` plus a random per-tab id `conn`. When you close the page it
+  sends `state: offline`. A tab left in the background for 30 minutes stops sending (you show as offline)
+  until you come back to it. It never sends activity codes or a version, so friends see you as online with
+  no activity (`app.js`: every `api('POST', '/status', …)`; checked by `relay/worker/app.test.mjs`).
+- Your member key is stored in this browser's `localStorage` for the relay's address. Anyone with access
+  to this browser profile can act as you in the group; clearing site data logs you out.
+- Friends' names and the group name are put on the page with `textContent` only, never parsed as HTML.
+  Error messages are fixed sentences picked by status code; text from the server is never shown.
+- The page loads no outside scripts, styles or fonts. Its Content-Security-Policy
+  (`relay/worker/guide/_headers`) allows scripts, styles and requests only to the same address and
+  forbids framing.
+- The activity labels come from the same list as the plugin (`labels.js` is generated from
+  `mod/hooks/taxonomy.ts` by `build_plugin.mjs`).
 
 ## What you cannot check from here
 

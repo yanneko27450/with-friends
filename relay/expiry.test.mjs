@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
+import { TEST_RESPONSE_SIGNING } from './test-fixtures/response-signing-key.mjs'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const TTL = 3000
@@ -48,12 +49,17 @@ async function removeDir(dir) {
 const relays = {
   'Node 開發版': dir => {
     const data = join(dir, 'relay-data.json')
-    const child = spawn(process.execPath, [join(here, 'server.mjs'), '--port', '18788', '--data', data, '--activity-ttl-ms', String(TTL)], { stdio: 'ignore' })
+    const child = spawn(process.execPath, [join(here, 'server.mjs'), '--port', '18788', '--data', data, '--activity-ttl-ms', String(TTL)], {
+      stdio: 'ignore',
+      env: { ...process.env, RESPONSE_SIGNING_PRIVATE_KEY: TEST_RESPONSE_SIGNING.privateKeyPkcs8, RESPONSE_SIGNING_KEY_ID: TEST_RESPONSE_SIGNING.keyId },
+    })
     return { child, base: 'http://127.0.0.1:18788', stored: () => (existsSync(data) ? readFileSync(data, 'utf8') : '') }
   },
   'Worker 版': dir => {
     const wrangler = join(here, 'worker', 'node_modules', 'wrangler', 'bin', 'wrangler.js')
-    const child = spawn(process.execPath, [wrangler, 'dev', '--ip', '127.0.0.1', '--port', '8796', '--persist-to', dir, '--var', `ACTIVITY_TTL_MS:${TTL}`, '--show-interactive-dev-session=false'], {
+    const child = spawn(process.execPath, [wrangler, 'dev', '--ip', '127.0.0.1', '--port', '8796', '--persist-to', dir, '--var', `ACTIVITY_TTL_MS:${TTL}`,
+      '--var', `RESPONSE_SIGNING_PRIVATE_KEY:${TEST_RESPONSE_SIGNING.privateKeyPkcs8}`, '--var', `RESPONSE_SIGNING_KEY_ID:${TEST_RESPONSE_SIGNING.keyId}`,
+      '--show-interactive-dev-session=false'], {
       cwd: join(here, 'worker'), stdio: 'ignore',
     })
     const doDir = join(dir, 'v3', 'do', 'friends-status-relay-Group')

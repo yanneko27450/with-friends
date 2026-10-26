@@ -1,6 +1,6 @@
 // 介面字串：第一次照桌面版／電腦的語言自動選（ui-21），之後用 pane 上的語言按鈕或 /friends lang 換。
 // 好友的動態不在這裡：它是代碼，由 taxonomy.ts 的 activityText 用看的人的語言顯示。
-import type { Lang } from './taxonomy'
+import type { Avatar, Lang } from './taxonomy'
 
 /** 公開原始碼（邀請文字附上，朋友和朋友的 Claude 裝之前可以先讀；10-12 朋友的 Claude 因為看不到程式碼拒絕安裝） */
 export const SOURCE_URL = 'https://github.com/yanneko27450/with-friends'
@@ -11,8 +11,17 @@ export const STRINGS = {
     commandDescription: 'Friends with Claude: see who is online and what kind of work they are doing with Claude',
     notInGroup: 'Not in a group yet.',
     createHint: 'Create: /friends create <your name>',
-    joinHint: 'Or create your own: /friends create <your name>',
+    joinHint: 'No invite? Create your own group, then invite friends.',
+    createGroup: 'Create a group',
+    askGroupName: 'Name your group. Friends will see it (up to 30 characters). Type it in the text box.',
+    askGroupNameHeader: 'Group name',
+    groupNameDefault: (name: string) => `${name}'s group`,
+    useDefaultGroupName: (name: string) => `Use "${name}'s group"`,
+    cancelCreate: "Don't create",
+    createCancelled: 'No group created.',
     joinIntro: 'Got an invite from a friend? Paste it here.',
+    /** ui-29h：手機的 pane 沒有輸入框 */
+    joinIntroNoInput: 'Got an invite from a friend? Send the line they gave you (it starts with /friends join) as a message here. You can add your name at the end.',
     inviteLabel: 'Invite',
     invitePlaceholder: 'the line your friend sent you',
     inviteSubmit: 'next',
@@ -26,12 +35,38 @@ export const STRINGS = {
     joinCancelled: 'Not joined. Run /friends join <invite> whenever you like.',
     online: (n: number) => (n === 1 ? '1 friend online' : `${n} friends online`),
     loading: 'Loading…',
+    /** ui-22：頭像（只從固定清單挑） */
+    changeAvatar: 'Change avatar',
+    askAvatar: 'Which avatar do you want?',
+    askAvatarHeader: 'Avatar',
+    usageAvatar: (list: string) => `Usage: /friends avatar <code>. Codes: ${list}`,
+    avatarSet: (a: string) => `Avatar set to ${a}. Friends see it within a minute.`,
+    avatarCancelled: 'Avatar not changed.',
+    /** ui-9：/friends status（手機看不到 pane）。只有數字和清單內分類的文字，不列任何名字 */
+    statusSummary: (online: number, working: number, idle: number, top: string) =>
+      online === 0 ? 'No friends are online right now.'
+        : `${online === 1 ? '1 friend' : `${online} friends`} online: ${working} working, ${idle} idle.${top ? ` Most common: ${top}.` : ''}`,
+    statusNotJoined: "You're not in a group yet. Create one with /friends create <your name>, or join with /friends join <invite>.",
+    statusPaused: 'Sharing is paused, so friends only see whether you are online. Run /friends resume to share again.',
+    statusUnreachable: "Can't reach the relay right now. Try /friends status again in a minute.",
+    avatarSetNotJoined: (a: string) => `Avatar set to ${a}. Your friends will see it after you join a group.`,
+    /** ui-4：pane 的四種狀態（只有自己／連不上／暫停中；需要升版是 tooOld）各一句固定句子＋下一步 */
+    alone: 'Only you in this group so far. Press "Copy invite" and send it to a friend.',
+    unreachable: "Can't reach the relay. Retrying automatically…",
+    pausedHint: 'Press "Resume sharing" to share again.',
     more: (n: number) => `+${n} more`,
     you: ' (you)',
     presence: { working: 'Working', idle: 'Idle', offline: 'Offline' },
+    // a11y-1：頭像的替代文字（讀螢幕的人聽到「名字 · 狀態 · 哪一隻」）；狀態不能只靠顏色
+    avatarName: {
+      cat: 'cat', dog: 'dog', fox: 'fox', panda: 'panda', rabbit: 'rabbit', bear: 'bear', koala: 'koala', tiger: 'tiger',
+      lion: 'lion', frog: 'frog', owl: 'owl', penguin: 'penguin', octopus: 'octopus', whale: 'whale', unicorn: 'unicorn', robot: 'robot',
+    } as Record<Avatar, string>,
+    avatarAlt: (name: string, presence: string, animal?: string) => `${name} · ${presence}${animal ? ` · ${animal} avatar` : ''}`,
     justNow: 'just now',
     minAgo: (n: number) => `${n}m ago`,
     hourAgo: (n: number) => `${n}h ago`,
+    dayAgo: (n: number) => `${n}d ago`,
     myPaused: 'Sharing paused — friends only see whether you are online',
     myHidden: 'This folder is not shared — friends see "Working"',
     myActivity: (s: string) => `Friends see: ${s}`,
@@ -50,41 +85,62 @@ export const STRINGS = {
     /** ui-21：安裝步驟用另一個語言（主人 10-12 選「複製時多一個選項」，給看中文的朋友） */
     installedNoOther: 'Not yet, add Chinese (繁體中文) install steps',
     /** 朋友還沒裝：可以直接丟聊天軟體的口語訊息（主人 10-12 選 C 版：口語＋不要轉傳）。
-     * 桌面版打 /plugin 只會開設定頁（10-12 彩排）→ 主人 10-12 選 A：請朋友自己的 Claude 跑 claude plugin 指令。
-     * 加入那一行分開、到新對話單獨送，邀請碼才不會進朋友跟 Claude 的對話 */
-    inviteMessage: (market: string, join: string) => [
-      "Hi! I'm using a Claude Code plugin called Friends with Claude — we can see whether each other is online and what kind of work we're doing (never the conversation itself). To join:",
-      "You need Claude Code on a computer (the Code tab of the Claude desktop app, or claude in a terminal). If you only use Chat (claude.ai, the Chat tab, or the phone app), skip this for now and wait for the web version.",
-      "1. Open a local conversation in Claude Code (the Code tab of the Claude desktop app, with a folder on your own computer, not a cloud session: cloud sessions can't reach the relay and the pane only shows on your computer), or run claude in a terminal, and send Claude this:",
-      `   Please install the Claude Code plugin Friends with Claude for me. Its source code is public at ${SOURCE_URL} (SECURITY.md says what it reads and what it sends), so you can look first; the install package can be rebuilt with relay/worker/build_plugin.mjs from that repo and gets the same sha256 as marketplace.json. To install, run these two commands: claude plugin marketplace add ${market} and then claude plugin install with-friends@with-friends. If the claude command isn't found, use the claude that comes with the Claude desktop app: on Windows it's the newest %APPDATA%\\Claude\\claude-code\\<version>\\<folder>\\claude.exe (in PowerShell, look under $env:APPDATA\\Claude\\claude-code), and in Bash its full path is in the CLAUDE_CODE_EXECPATH environment variable. Tell me when it's done.`,
-      '2. Once it is installed, a Friends with Claude pane opens on the right by itself. Paste this line into the box there (not into the chat). If no pane opens, start a new conversation and send only this line:',
+     * ui-23b（主人 10-15 選 A）：安裝只留一句「照 README 的安裝步驟」，指令和資安說明都在公開 README；連 repo、不連錨點。
+     * 加入那一行貼進框（不是對話），邀請碼才不會進朋友跟 Claude 的對話；框沒跳出來的備案照舊 */
+    inviteMessage: (join: string) => [
+      "Hi! I'm using a Claude Code plugin called Friends with Claude — we can see whether each other is online and what kind of work we're doing (never the conversation itself).",
+      '1. In a local Claude Code conversation on your computer (not a cloud session), send Claude this:',
+      `   Please install the Claude Code plugin Friends with Claude by following the install steps in the README at ${SOURCE_URL}`,
+      '2. When the Friends with Claude pane opens, paste this line into it (not into the chat). If no pane opens, start a new conversation and send only this line:',
       `   ${join}`,
-      "It'll ask what name to show. Fill it in and you're in!",
       "This invite is just for you, please don't forward it.",
     ].join('\n'),
     opened: 'Friends with Claude pane opened.',
     usageCreate: 'Usage: /friends create <your name>',
     usageJoin: 'Usage: /friends join <invite> [your name]',
+    /** sec-14：已經在群組裡又打 create／join。不帶群組名（中繼回的字不進指令輸出） */
+    alreadyInGroup: "You're already in a group. To switch groups, run /friends leave first, then join or create again.",
     created: 'Group created. Press "Copy invite" in the Friends with Claude pane and send it to a friend.',
     joined: 'Joined the group. The Friends with Claude pane is open.',
     paused: 'Sharing paused: friends only see whether you are online.',
     resumed: 'Sharing resumed.',
     hiddenList: (dirs: string[]) => `Folders not shared:\n${dirs.join('\n') || '(none)'}`,
-    usageRelay: (cur: string) => `Usage: /friends relay https://... (now: ${cur})`,
+    usageRelay: (cur: string) => `Usage: /friends relay https://... <key id> <Ed25519 public key> (the official relay needs neither; now: ${cur})`,
     relaySet: (url: string) => `Relay set to ${url}. The next create/join uses it.`,
     notJoined: 'Not in a group yet.',
     rotated: 'New invite made; the old one no longer works. Copy it from the pane.',
+    /** L-14：換邀請碼時，別的對話剛好離開或換了群組：這裡什麼都沒存 */
+    rotateStale: 'Your group changed in another conversation while the invite was being replaced, so nothing was saved here. Run /friends rotate again if you still need a new invite.',
     left: 'Left the group. Nothing is shared any more.',
+    /** L-16：離開的期間在別的對話加入了另一個群組：那個保留著（不帶群組名） */
+    leftKeptOther: 'Left that group. Meanwhile you joined or created a group in a different conversation; that one is kept.',
+    /** L-16：--force（中繼沒收到）而且這段時間別的對話加入了群組 */
+    leftLocalOnlyKeptOther: 'Removed that group from this computer only (the relay was not told, so friends there may still see your name, shown offline). Meanwhile you joined or created a group in a different conversation; that one is kept.',
+    /** L-16：pane 的確認框開著時，別的對話離開或換了群組：這次什麼都沒做 */
+    leaveStale: 'Your group changed in another conversation, so nothing was done. Press "Leave group" again if you still want to leave.',
     usageLang: 'Usage: /friends lang en | zh-TW',
     langSet: 'Language set to English.',
     /** pane 上切語言的按鈕：寫成「要切過去的那個語言」自己的名字，看不懂現在的語言也找得到 */
     switchLang: '繁體中文',
+    /** ui-28：pane 右下角版本號底下的按鈕，點開小框框看每個版本更新了什麼 */
+    whatsNew: "What's new",
+    /** 框框每一段的標題：版本號＋日期（YYYY-MM-DD，中英都用這個格式，ui-28b） */
+    changelogVersion: (v: string, date: string) => `v${v} · ${date}`,
+    changelogUpTo: (v: string, date: string) => `${v} and earlier · ${date}`,
+    /** ui-29j：框頂「◀ 版本 ▶」兩邊畫的字；Name 是按鈕的名字（螢幕閱讀器唸的，不畫出來） */
+    changelogOlder: '◀',
+    changelogNewer: '▶',
+    changelogOlderName: 'Older version',
+    changelogNewerName: 'Newer version',
     recent: 'Recent activity',
-    /** 動態流：工作中＝「正在…」、閒置＝上一件事 */
-    doingPrefix: { working: '', idle: 'Last: ' },
     noActivity: 'Online',
     startedAgo: (ago: string) => `started ${ago}`,
+    oldVersion: (v: string) => `old version v${v}`,
     offlineList: (names: string) => `Offline: ${names}`,
+    offlineTitle: (n: number) => `Offline · ${n}`,
+    feedTitle: 'Friends',
+    youLabel: 'You',
+    lastSeen: (ago: string) => `last online ${ago}`,
     morePeople: (n: number) => `+${n}`,
     /** ui-19 B：加入或建立群組後問一次（主人 10-12「AB都要」） */
     askAutoUpdate: 'When Friends with Claude has a new version, update it automatically? New versions come from the server you installed it from (the address in the install steps), install in the background, and take effect in your next new conversation. You can turn this off anytime with /friends autoupdate off.',
@@ -99,6 +155,10 @@ export const STRINGS = {
     updateNow: 'Update',
     updateAlways: 'Always update automatically',
     updateRetry: 'Try again',
+    /** ver-2：中繼說這個版本太舊（不顯示中繼回的版本字串）。ui-26：pane 窄、這列會截斷，旁邊就是「更新」鈕，句子不用再說「請按更新」 */
+    tooOld: 'This version is too old.',
+    /** fix-3：市集上還沒有夠新的版本（按更新也沒用）：不配更新鈕 */
+    tooOldWait: 'This version is too old. A new version is coming soon.',
     updating: 'Updating…',
     updatedPane: 'Updated. Open a new conversation to use the new version.',
     updateFailedPane: "Couldn't update automatically. Ask Claude to run: claude plugin marketplace update with-friends, then claude plugin update with-friends@with-friends",
@@ -115,9 +175,12 @@ export const STRINGS = {
         case 401: return 'This computer is no longer in that group (you were removed, or the group was deleted).'
         case 403: return 'The relay said no: the invite may be wrong or expired, the group may be full (10 people), or only the group creator can do that.'
         case 404: return "This relay doesn't support that. Check the relay address with /friends relay."
+        case 503: return `The public relay is full. Existing members can keep using it; to create or join another group, self-host a relay: ${SOURCE_URL}/blob/main/relay/DEPLOY.md`
         case 429: return 'Too many tries. Wait a while and try again.'
         case -1: return 'The relay sent back something unexpected.'
         case -2: return 'Something went wrong. Try again.'
+        case -3: return "This relay address can't be used: it must start with https:// followed by a plain host name (http:// is only for localhost testing), so your group key never travels unencrypted. Use a relay address (or an invite) that starts with https:// (if this computer is still in a group on that relay, run /friends leave --force first)."
+        case -4: return 'This self-hosted relay pin is from an older version and has no key id. Set it again with /friends relay before connecting.'
         default: return `The relay had a problem (HTTP ${status}). Try again later.`
       }
     },
@@ -135,10 +198,12 @@ export const STRINGS = {
       '/friends create <name>          create a group (copy the invite from the pane)',
       '/friends join <invite> [name]   join a friend\'s group (asks your name if left out)',
       '/friends pause | resume         pause / resume sharing what you work on',
+      '/friends status                 one-line summary: how many friends are online (no names)',
       '/friends hide [dir] | unhide [dir] | hidden   folders never shared',
-      '/friends relay <url>            use another relay',
+      '/friends relay <url> <key id> <public key> pin and use another relay',
       '/friends rotate                 new invite (group owner)',
       '/friends lang en | zh-TW        interface language',
+      '/friends avatar <code>          pick an avatar (cat, fox, robot…)',
       '/friends update                 update to the newest version',
       '/friends autoupdate on | off    update automatically when there is a new version',
       '/friends leave [--force]        leave the group (--force: this computer only, if the relay is unreachable)',
@@ -149,8 +214,16 @@ export const STRINGS = {
     commandDescription: 'Friends with Claude：看好友在不在線、正在用 Claude 做哪一類事',
     notInGroup: '還沒加入群組。',
     createHint: '建立：/friends create 你的名字',
-    joinHint: '想自己開群組：/friends create 你的名字',
+    joinHint: '沒有邀請？自己建立一個群組，再邀朋友。',
+    createGroup: '建立群組',
+    askGroupName: '幫群組取個名字，朋友會看到（最多 30 字）。直接在輸入框打字。',
+    askGroupNameHeader: '群組名稱',
+    groupNameDefault: (name: string) => `${name} 的群組`,
+    useDefaultGroupName: (name: string) => `用「${name} 的群組」`,
+    cancelCreate: '先不建立',
+    createCancelled: '沒有建立群組。',
     joinIntro: '朋友傳了邀請給你嗎？貼在這裡。',
+    joinIntroNoInput: '朋友傳了邀請給你嗎？把朋友傳來的那一行（開頭是 /friends join）直接送出，可以在最後加上你的名字。',
     inviteLabel: '邀請',
     invitePlaceholder: '朋友傳給你的那一行',
     inviteSubmit: '下一步',
@@ -164,12 +237,33 @@ export const STRINGS = {
     joinCancelled: '沒有加入。之後想加入，再打 /friends join 邀請。',
     online: (n: number) => `${n} 位好友在線`,
     loading: '載入中…',
+    changeAvatar: '換頭像',
+    askAvatar: '想用哪個頭像？',
+    askAvatarHeader: '頭像',
+    usageAvatar: (list: string) => `用法：/friends avatar 代碼。可以用：${list}`,
+    avatarSet: (a: string) => `頭像換成 ${a} 了，朋友一分鐘內會看到。`,
+    avatarCancelled: '頭像沒有換。',
+    statusSummary: (online: number, working: number, idle: number, top: string) =>
+      online === 0 ? '目前沒有朋友在線。' : `${online} 位在線：工作中 ${working}、閒置 ${idle}${top ? `；最多人在：${top}` : ''}。`,
+    statusNotJoined: '你還沒加入群組。用 /friends create 你的名字 建立，或用 /friends join 邀請 加入。',
+    statusPaused: '你已暫停分享，好友只看得到你在不在線。打 /friends resume 恢復分享。',
+    statusUnreachable: '現在連不上中繼，過一分鐘再打一次 /friends status。',
+    avatarSetNotJoined: (a: string) => `頭像換成 ${a} 了，加入群組後朋友就會看到。`,
+    alone: '群組裡目前只有你。按「複製邀請碼」傳給朋友。',
+    unreachable: '連不上中繼，稍後自動重試…',
+    pausedHint: '按「恢復分享」就會再分享。',
     more: (n: number) => `還有 ${n} 位`,
     you: '（你）',
     presence: { working: '工作中', idle: '閒置', offline: '離線' },
+    avatarName: {
+      cat: '貓', dog: '狗', fox: '狐狸', panda: '熊貓', rabbit: '兔子', bear: '熊', koala: '無尾熊', tiger: '老虎',
+      lion: '獅子', frog: '青蛙', owl: '貓頭鷹', penguin: '企鵝', octopus: '章魚', whale: '鯨魚', unicorn: '獨角獸', robot: '機器人',
+    } as Record<Avatar, string>,
+    avatarAlt: (name: string, presence: string, animal?: string) => `${name} · ${presence}${animal ? ` · ${animal}頭像` : ''}`,
     justNow: '剛剛',
     minAgo: (n: number) => `${n} 分鐘前`,
     hourAgo: (n: number) => `${n} 小時前`,
+    dayAgo: (n: number) => `${n} 天前`,
     myPaused: '你已暫停分享，好友只看得到你在不在線',
     myHidden: '這個資料夾不分享，好友看到「在忙」',
     myActivity: (s: string) => `好友看到你的動態：${s}`,
@@ -186,37 +280,51 @@ export const STRINGS = {
     installedYes: '裝好了，只複製邀請',
     installedNo: '還沒，附中文安裝步驟',
     installedNoOther: '還沒，附英文安裝步驟（給看英文的朋友）',
-    inviteMessage: (market: string, join: string) => [
-      '嗨！我在用一個 Claude Code 外掛「Friends with Claude」，可以看到彼此在不在線、在忙哪一類事（不會看到對話內容）。要加入的話：',
-      '需要電腦上的 Claude Code（Claude 桌面版的 Code 分頁，或在終端機開 claude）；只用 Chat（claude.ai 網頁、Chat 分頁、手機 App）的話先不用裝，等網頁版。',
-      '1. 在 Claude 桌面版的 Code 分頁開一個「本機」對話（選你自己電腦上的資料夾，不要選雲端：雲端環境連不到中繼，pane 也只會出現在你自己的電腦上），或在終端機開 claude，把這段傳給 Claude：',
-      `   請幫我安裝 Claude Code 外掛「Friends with Claude」。原始碼公開在 ${SOURCE_URL}（SECURITY.md 寫了它讀什麼、送什麼），可以先看；安裝包能用那個 repo 的 relay/worker/build_plugin.mjs 重新打出來，sha256 跟 marketplace.json 寫的一樣。要裝的話依序執行這兩個指令：claude plugin marketplace add ${market} 然後 claude plugin install with-friends@with-friends。找不到 claude 指令的話，用 Claude 桌面版內附的那一支：Windows 在 %APPDATA%\\Claude\\claude-code\\<版本>\\<資料夾>\\claude.exe，挑最新的版本（PowerShell 裡到 $env:APPDATA\\Claude\\claude-code 底下找）；用 Bash 的話，完整路徑在環境變數 CLAUDE_CODE_EXECPATH 裡。裝好跟我說。`,
-      '2. 裝好之後，右邊會自己跳出 Friends with Claude 的框，把這一行貼進框裡（不是貼進對話）。沒跳出來的話，開一個新對話、只傳這一行：',
+    inviteMessage: (join: string) => [
+      '嗨！我在用 Claude Code 外掛「Friends with Claude」，可以看到彼此在不在線、在忙哪一類事（不會看到對話內容）。',
+      '1. 在你電腦上的 Claude Code 開「本機」對話（不要選雲端），傳這句給 Claude：',
+      `   請照 ${SOURCE_URL} 的 README 裡的安裝步驟，幫我安裝 Claude Code 外掛 Friends with Claude`,
+      '2. 右邊跳出 Friends with Claude 的框之後，把這一行貼進框裡（不是貼進對話）。沒跳出來的話，開一個新對話、只傳這一行：',
       `   ${join}`,
-      '它會問你要叫什麼名字，填完就加入了～',
       '邀請碼只給你，請不要轉傳。',
     ].join('\n'),
     opened: 'Friends with Claude 已打開。',
     usageCreate: '用法：/friends create 你的名字',
     usageJoin: '用法：/friends join 邀請 [你的名字]',
+    alreadyInGroup: '你已經在一個群組裡了。要換群組，請先打 /friends leave 離開，再加入或建立。',
     created: '群組建好了。到 Friends with Claude pane 按「複製邀請碼」傳給朋友。',
     joined: '已加入群組，Friends with Claude pane 已打開。',
     paused: '已暫停分享：好友只看得到你在不在線。',
     resumed: '已恢復分享動態。',
     hiddenList: (dirs: string[]) => `不分享的資料夾：\n${dirs.join('\n') || '（沒有）'}`,
-    usageRelay: (cur: string) => `用法：/friends relay https://...（目前：${cur}）`,
+    usageRelay: (cur: string) => `用法：/friends relay https://... <金鑰代號> <Ed25519 公鑰>（官方中繼兩者都不用填；目前：${cur}）`,
     relaySet: (url: string) => `中繼改成 ${url}。之後的 create／join 會用這個。`,
     notJoined: '還沒加入群組。',
     rotated: '邀請碼換好了，舊的已失效。新的在 pane 裡複製。',
+    rotateStale: '換邀請碼的時候，你在別的對話離開或換了群組，所以這裡什麼都沒存。還需要新的邀請碼就再打一次 /friends rotate。',
     left: '已離開群組，不再分享任何狀態。',
+    leftKeptOther: '已離開那個群組。你在這段時間從別的對話加入（或建立）了群組，那份保留著。',
+    leftLocalOnlyKeptOther: '只從這台電腦移除了那個群組（中繼沒收到通知，那邊的朋友可能還會看到你的名字，顯示離線）。你在這段時間從別的對話加入（或建立）了群組，那份保留著。',
+    leaveStale: '你在別的對話離開或換了群組，所以這次什麼都沒做。還要離開就再按一次「離開群組」。',
     usageLang: '用法：/friends lang en | zh-TW',
     langSet: '介面改成繁體中文。',
     switchLang: 'English',
+    whatsNew: '版本紀錄',
+    changelogVersion: (v: string, date: string) => `v${v} · ${date}`,
+    changelogUpTo: (v: string, date: string) => `${v}（含）以前 · ${date}`,
+    changelogOlder: '◀',
+    changelogNewer: '▶',
+    changelogOlderName: '較舊的版本',
+    changelogNewerName: '較新的版本',
     recent: '最近動態',
-    doingPrefix: { working: '正在', idle: '剛剛在' },
     noActivity: '在線',
     startedAgo: (ago: string) => `${ago}開始`,
+    oldVersion: (v: string) => `舊版 v${v}`,
     offlineList: (names: string) => `離線：${names}`,
+    offlineTitle: (n: number) => `離線 · ${n} 位`,
+    feedTitle: '好友動態',
+    youLabel: '你',
+    lastSeen: (ago: string) => `${ago}在線`,
     morePeople: (n: number) => `+${n}`,
     askAutoUpdate: 'Friends with Claude 有新版時要自動更新嗎？新版來自你當初安裝的那個伺服器（安裝步驟裡的那個網址），會在背景裝好，下一個新對話就是新版。隨時可以打 /friends autoupdate off 關掉。',
     askAutoUpdateHeader: '自動更新',
@@ -229,6 +337,8 @@ export const STRINGS = {
     updateNow: '更新',
     updateAlways: '以後自動更新',
     updateRetry: '再試一次',
+    tooOld: '這個版本太舊了',
+    tooOldWait: '這個版本太舊了，新版即將推出',
     updating: '更新中…',
     updatedPane: '更新好了，開一個新對話就是新版。',
     updateFailedPane: '沒辦法自動更新。請 Claude 幫你跑：claude plugin marketplace update with-friends，再跑 claude plugin update with-friends@with-friends',
@@ -244,9 +354,12 @@ export const STRINGS = {
         case 401: return '這台電腦已經不在那個群組裡了（被移除，或群組已刪除）。'
         case 403: return '中繼拒絕了：邀請可能打錯或失效、群組可能滿了（10 人），或這件事只有群組建立者能做。'
         case 404: return '這個中繼不支援這個動作，用 /friends relay 檢查中繼網址。'
+        case 503: return `公開中繼滿了；已加入的人仍可繼續使用。要建立或加入其他群組，請自架中繼：${SOURCE_URL}/blob/main/relay/DEPLOY.md`
         case 429: return '嘗試太多次，等一下再試。'
         case -1: return '中繼回了看不懂的東西。'
         case -2: return '出了點問題，再試一次。'
+        case -3: return '這個中繼網址不能用：要是 https:// 開頭、後面接一般的主機名（http:// 只限本機測試），群組金鑰才不會在網路上明碼傳。請改用 https:// 開頭的中繼網址（或邀請）；這台電腦如果還在那個中繼的群組裡，先打 /friends leave --force。'
+        case -4: return '這個自架中繼的舊釘選沒有金鑰代號。請先用 /friends relay 重新設定，才會連線。'
         default: return `中繼出了問題（HTTP ${status}），晚點再試。`
       }
     },
@@ -263,10 +376,12 @@ export const STRINGS = {
       '/friends create 你的名字          建立群組（邀請碼在 pane 裡複製）',
       '/friends join 邀請 [你的名字]      加入朋友的群組（沒給名字會問你）',
       '/friends pause | resume         暫停／恢復分享動態',
+      '/friends status                 一句摘要：幾位朋友在線（不列名字）',
       '/friends hide [資料夾] | unhide [資料夾] | hidden   不分享的資料夾',
-      '/friends relay 網址               換中繼伺服器',
+      '/friends relay 網址 金鑰代號 公鑰   釘選並改用自架中繼',
       '/friends rotate                 換邀請碼（建立者）',
       '/friends lang en | zh-TW        介面語言',
+      '/friends avatar 代碼              換頭像（cat、fox、robot…）',
       '/friends update                 更新到最新版',
       '/friends autoupdate on | off    有新版時自動更新',
       '/friends leave [--force]        離開群組（--force：中繼連不上時只從這台電腦移除）',

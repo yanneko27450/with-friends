@@ -42,6 +42,14 @@ export const LANGS: readonly Lang[] = ['en', 'zh-TW']
 export const isAction = (v: unknown): v is Action => typeof v === 'string' && (ACTIONS as readonly string[]).includes(v)
 export const isSubject = (v: unknown): v is Subject => typeof v === 'string' && (SUBJECTS as readonly string[]).includes(v)
 
+/** ui-22：頭像也是清單內代碼（跟分類一樣）：中繼只收這 16 個，pane 照代碼畫表情符號（avatar.ts 的 AVATAR_EMOJI） */
+export const AVATARS = [
+  'cat', 'dog', 'fox', 'panda', 'rabbit', 'bear', 'koala', 'tiger',
+  'lion', 'frog', 'owl', 'penguin', 'octopus', 'whale', 'unicorn', 'robot',
+] as const
+export type Avatar = (typeof AVATARS)[number]
+export const isAvatar = (v: unknown): v is Avatar => typeof v === 'string' && (AVATARS as readonly string[]).includes(v)
+
 /** 看的人用自己的語言讀代碼；代碼不在表裡（舊版中繼、別人的新版）就當 other。 */
 export const ACTION_LABEL: Record<Lang, Record<Action, string>> = {
   en: {

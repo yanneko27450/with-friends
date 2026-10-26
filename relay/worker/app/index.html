@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Friends with Claude</title>
+<meta name="description" content="用瀏覽器看朋友在不在線、正在用 Claude 做哪一類事。">
+<link rel="stylesheet" href="/app.css">
+<script src="/labels.js" defer></script>
+<script src="/app.js" defer></script>
+</head>
+<body>
+<div class="shell" id="shell">
+  <header class="side side-top">
+    <div class="brandrow">
+      <a class="brand" href="/guide">Friends with Claude</a>
+      <button class="pill" id="lang" type="button">English</button>
+    </div>
+    <div id="top-joined" hidden>
+      <h1 id="group-name" tabindex="-1"></h1>
+      <p class="count"><b class="num" id="online-n">0</b><span class="num total" id="total-n"></span><span id="online-label"></span></p>
+      <ul class="who" id="who" aria-label=""></ul>
+    </div>
+    <div id="top-join" hidden>
+      <h1 data-t="joinTitle"></h1>
+      <p class="lede" data-t="joinLede"></p>
+    </div>
+  </header>
+
+  <main class="main" id="main">
+    <section id="join" hidden aria-labelledby="join-h">
+      <h2 id="join-h" class="sr" data-t="joinH"></h2>
+      <form class="card form" id="join-form" novalidate>
+        <label for="invite"><span data-t="inviteLabel"></span></label>
+        <input id="invite" name="invite" type="text" autocomplete="off" spellcheck="false" inputmode="url" required>
+        <p class="hint" data-t="inviteHint"></p>
+        <label for="name"><span data-t="nameLabel"></span></label>
+        <input id="name" name="name" type="text" maxlength="20" autocomplete="nickname" required>
+        <p class="hint" data-t="nameHint"></p>
+        <p class="err" id="join-err" role="alert" hidden></p>
+        <button class="btn primary" id="join-btn" type="submit" data-t="joinBtn"></button>
+      </form>
+      <div class="notes">
+        <h3 data-t="notesH"></h3>
+        <ul>
+          <li data-t="note1"></li>
+          <li data-t="note2"></li>
+          <li><span data-t="note3"></span> <a href="/guide" data-t="note3Link"></a></li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="feed" hidden aria-labelledby="feed-h">
+      <div class="feed-head">
+        <h2 id="feed-h" data-t="recent"></h2>
+        <p class="net" id="net" role="status" aria-live="polite"></p>
+      </div>
+      <ol class="tl" id="tl"></ol>
+      <p class="empty" id="empty" hidden></p>
+    </section>
+  </main>
+
+  <aside class="side side-bottom" id="me" hidden aria-labelledby="me-h">
+    <div class="label">
+      <h2 class="ttl" id="me-h" data-t="meTitle"></h2>
+      <div class="row"><span data-t="rowName"></span><span class="v" id="me-name"></span></div>
+      <div class="row"><span data-t="rowOnline"></span><span class="v" data-t="rowOnlineV"></span></div>
+      <div class="row thick"><span data-t="rowDoing"></span><span class="v" data-t="rowDoingV"></span></div>
+      <p class="foot" data-t="meFoot"></p>
+    </div>
+    <div class="actions">
+      <button class="btn lime" id="copy" type="button" data-t="copyInvite"></button>
+      <span class="copied" id="copied" role="status" aria-live="polite"></span>
+    </div>
+    <input class="linkbox" id="linkbox" type="text" readonly hidden aria-label="">
+    <div class="leave" id="leave-area">
+      <button class="btn ghost" id="leave" type="button" data-t="leave"></button>
+      <span id="leave-confirm" hidden>
+        <span class="q" data-t="leaveQ"></span>
+        <button class="btn danger" id="leave-yes" type="button" data-t="leaveYes"></button>
+        <button class="btn ghost" id="leave-no" type="button" data-t="leaveNo"></button>
+      </span>
+    </div>
+    <p class="err onDark" id="leave-err" role="alert" hidden></p>
+  </aside>
+</div>
+<noscript><p class="nojs">這個頁面需要 JavaScript。This page needs JavaScript.</p></noscript>
+</body>
+</html>

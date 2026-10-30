@@ -3,201 +3,479 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>Friends with Claude 說明</title>
-<meta name="description" content="Friends with Claude：Claude Code 外掛，看朋友在不在線、在用 Claude 做哪一類事。會分享什麼、怎麼裝、資安怎麼做。">
-<link rel="stylesheet" href="/guide.css">
-<script src="/guide.js" defer></script>
+<meta name="description" content="Friends with Claude：送了什麼、伺服器存了什麼、版本怎麼更新，每一條都附上怎麼驗證。">
+<link rel="stylesheet" href="guide.css">
 </head>
 <body>
+<a class="skip" href="#main"><span class="zh">跳到內容</span><span class="en">Skip to content</span></a>
 
-<div class="top">
-  <div class="brand"><i></i>Friends with Claude</div>
-  <button class="langbtn" id="langbtn" type="button"><span class="zh">English</span><span class="en">中文</span></button>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top">Friends with Claude</a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#security"><span class="zh">安全性</span><span class="en">Security</span></a>
+      <a href="#data"><span class="zh">資料庫</span><span class="en">Data</span></a>
+      <a href="#versions"><span class="zh">版本與更新</span><span class="en">Updates</span></a>
+      <a href="#install"><span class="zh">安裝</span><span class="en">Install</span></a>
+    </nav>
+    <button class="langbtn" id="langbtn" type="button"><span class="zh">English</span><span class="en">中文</span></button>
+  </div>
+</header>
+
+<main id="main">
+<div class="wrap" id="top">
+
+  <!-- 首屏：一句話＋資料標籤 -->
+  <section class="hero" aria-labelledby="h1">
+    <div class="hero-text">
+      <span class="kick"><span class="zh">Claude Code 外掛 · 公開說明</span><span class="en">Claude Code plugin · public notes</span></span>
+      <h1 id="h1"><span class="zh">朋友看得到你<em>在線</em>，<br>看不到你的對話。</span><span class="en">Friends see you're <em>online</em>. Never what you say.</span></h1>
+      <p class="lede measure"><span class="zh">裝了之後，Claude 旁邊多一個小面板，看得到群組裡誰在線上、在用 Claude 做哪一類事。送出去的每一樣東西都印在這張資料標籤上；安全、資料庫、版本怎麼更新，下面一件一件攤開，每條都附上怎麼驗證。</span><span class="en">It adds a small panel next to Claude showing which friends are online and what kind of thing they're working on. Everything it sends is printed on the data label. Security, storage and updates are laid out below, each with a way to check it yourself.</span></p>
+      <div class="bigfacts">
+        <div><b>0</b><span><span class="zh">句對話送到伺服器</span><span class="en">words of your chats sent</span></span></div>
+        <div><b>24h</b><span><span class="zh">分類自動刪除</span><span class="en">until categories are deleted</span></span></div>
+        <div><b>25/25</b><span><span class="zh">伺服器測試通過</span><span class="en">server tests passing</span></span></div>
+      </div>
+      <ul class="facts" aria-label="Status">
+        <li class="fact"><span class="dot" id="verdot"></span><span class="zh">目前版本</span><span class="en">Version</span> <span class="num" id="ver">0.4.0</span></li>
+        <li class="fact"><span class="dot wait" id="relaydot"></span><span id="relay"><span class="zh">中繼狀態：載入中</span><span class="en">Relay: checking</span></span></li>
+        <li class="fact"><span class="dot amber"></span><span class="zh">外部資安審查：還沒做</span><span class="en">External security review: not yet</span></li>
+      </ul>
+    </div>
+
+    <aside class="label" aria-labelledby="labelttl">
+      <div class="ttl" id="labelttl"><span class="zh">資料標籤</span><span class="en">Data label</span></div>
+      <div class="sub"><span class="zh">每位成員 · 面板開著約每 20 秒送一次，關著每分鐘一次</span><span class="en">Per member · about every 20 s with the panel open, once a minute when closed</span></div>
+      <div class="row thick"><b><span class="zh">朋友看得到的</span><span class="en">What friends see</span></b><b class="v"><span class="zh">保存</span><span class="en">Kept</span></b></div>
+      <div class="row"><span><span class="zh">你取的名字（最多 20 字）</span><span class="en">The name you pick (≤ 20 chars)</span></span><span class="v"><span class="zh">到你退出</span><span class="en">until you leave</span></span></div>
+      <div class="row"><span><span class="zh">工作中／閒置／離線</span><span class="en">Working / idle / offline</span></span><span class="v"><span class="zh">只在記憶體</span><span class="en">memory only</span></span></div>
+      <div class="row"><span><span class="zh">外掛版本號（例 0.4.0，只收數字）</span><span class="en">Plugin version (e.g. 0.4.0, digits only)</span></span><span class="v"><span class="zh">到你退出</span><span class="en">until you leave</span></span></div>
+      <div class="row thick"><span><span class="zh">一個分類＋開始時間</span><span class="en">One category + start time</span></span><span class="v num">24 h</span></div>
+      <div class="row thick"><b><span class="zh">送到伺服器的對話內容</span><span class="en">Chat content sent to the server</span></b><b class="v"></b></div>
+      <div class="row zero"><span><span class="zh">你打的字</span><span class="en">What you type</span></span><span class="v num">0</span></div>
+      <div class="row zero"><span><span class="zh">Claude 的回答</span><span class="en">Claude's replies</span></span><span class="v num">0</span></div>
+      <div class="row zero"><span><span class="zh">檔案、程式碼、路徑、專案名</span><span class="en">Files, code, paths, project names</span></span><span class="v num">0</span></div>
+      <div class="foot"><span class="zh">外掛會在你的電腦上讀你打的字來挑分類：先遮掉網址、路徑這類字串，交給你自己的 Claude 判斷，只留下分類代碼。只要 Claude Code 開著，朋友就看得到你在線。伺服器另外收到登入金鑰和邀請碼（都只存雜湊），以及你的 IP。另外，外掛每次開對話都會向中繼查一次有沒有新版，所以中繼看得到你的 IP 和開對話的時間；這個沒有開關，退出群組後也會繼續，要停就移除外掛。</span><span class="en">The plugin reads what you type on your own computer to pick a category: it masks things like URLs and paths, asks your own Claude, and keeps only the category code. Whenever Claude Code is open, friends can see you're online. The server also receives your sign-in key and the invite (both stored only as hashes) and your IP address. Also, each time you start a conversation the plugin asks the relay whether there's a new version, so the relay sees your IP and when you start conversations. There's no switch for this and it continues after you leave a group; uninstall the plugin to stop it.</span></div>
+    </aside>
+  </section>
+
+  <!-- 三支柱 -->
+  <section class="pillars" aria-label="Overview">
+    <a class="pcard sec" href="#security">
+      <div class="n"><span>01</span><span><span class="zh">10 條承諾</span><span class="en">10 promises</span></span></div>
+      <h2><span class="zh">安全性證明</span><span class="en">Security, with proof</span></h2>
+      <p><span class="zh">每個承諾都寫出怎麼做到、你可以怎麼自己查。還沒做到的也列出來。</span><span class="en">Every promise comes with how it's enforced and how you can check. What isn't done yet is listed too.</span></p>
+      <ul class="checks">
+        <li><span class="zh">伺服器只收固定清單裡的分類代碼，收不下一句話</span><span class="en">The server only accepts codes from a fixed list, so it can't take a sentence</span></li>
+        <li><span class="zh">朋友的名字不會進你的對話，沒辦法用文字騙你的 Claude 做事</span><span class="en">Friends' names never enter your conversation, so nobody can use text to trick your Claude</span></li>
+        <li><span class="zh">金鑰只存雜湊，資料庫外流也沒人能冒充你</span><span class="en">Only a hash of your key is stored, so a leak can't be used to log in as you</span></li>
+        <li><span class="zh">原始碼公開在 GitHub（每 4～5 版更新一次），公開的版本可以自己重打出同一個指紋</span><span class="en">Source code is public on GitHub (updated every 4–5 releases); published versions rebuild to the same fingerprint</span></li>
+        <li class="plan"><span class="zh">外部資安審查：規劃中</span><span class="en">External security review: planned</span></li>
+      </ul>
+      <span class="more"><span class="zh">看 10 個承諾與證據 ↓</span><span class="en">See all 10 promises and the evidence ↓</span></span>
+    </a>
+    <a class="pcard db" href="#data">
+      <div class="n"><span>02</span><span>Cloudflare</span></div>
+      <h2><span class="zh">資料庫怎麼管</span><span class="en">How data is stored</span></h2>
+      <div class="stats">
+        <div class="stat"><b>24 h</b><span><span class="zh">分類自動刪</span><span class="en">categories deleted</span></span></div>
+        <div class="stat"><b>0 s</b><span><span class="zh">退出就刪你</span><span class="en">to delete you on leave</span></span></div>
+        <div class="stat"><b>30 d</b><span><span class="zh">備份還原期</span><span class="en">backup window</span></span></div>
+      </div>
+      <span class="more"><span class="zh">存什麼、存哪、誰看得到 ↓</span><span class="en">What, where, and who can see it ↓</span></span>
+    </a>
+    <a class="pcard ver" href="#versions">
+      <div class="n"><span>03</span><span class="num">v<span id="ver3">0.4.0</span></span></div>
+      <h2><span class="zh">版本與更新</span><span class="en">Versions and updates</span></h2>
+      <p><span class="zh">有新版時面板會提醒你；要不要自動更新，加入時由你決定。</span><span class="en">The panel tells you when there's a new version; whether it updates itself is your choice when you join.</span></p>
+      <span class="more"><span class="zh">怎麼發版、你怎麼升 ↓</span><span class="en">How releases work and how to update ↓</span></span>
+    </a>
+    <a class="pcard inst" href="#install">
+      <div class="n"><span>04</span><span><span class="zh">3 步</span><span class="en">3 steps</span></span></div>
+      <h2><span class="zh">安裝與移除</span><span class="en">Install and remove</span></h2>
+      <p><span class="zh">開本機對話、把一段話傳給 Claude 讓它幫你裝，再把朋友的邀請貼進右邊的框。暫停、隱藏、退出隨時可以。</span><span class="en">Open a local conversation, send one paragraph so Claude installs it, then paste your friend's invite into the panel. Pause, hide or leave any time.</span></p>
+      <span class="more"><span class="zh">三個步驟 ↓</span><span class="en">Three steps ↓</span></span>
+    </a>
+    <a class="pcard later" href="#explore">
+      <div class="n"><span>05</span><span><span class="zh">規劃中</span><span class="en">planned</span></span></div>
+      <h2><span class="zh">探索群組</span><span class="en">Discover groups</span></h2>
+            <p><span class="zh">之後也許能找到公開的群組。還沒做。</span><span class="en">Maybe one day: finding public groups. Not built.</span></p>
+    </a>
+  </section>
+
+  <!-- 1 安全性 -->
+  <section class="chapter" id="security" aria-labelledby="h-sec">
+    <div class="chapter-head">
+      <div class="no">01</div>
+      <div>
+        <h2 id="h-sec"><span class="zh">安全性證明</span><span class="en">Security, with proof</span></h2>
+        <p class="measure muted"><span class="zh">「我們很安全」誰都會說。下面每一條都寫出做法和證據；證據欄寫的是對應的自動測試，2026-10-12 全部重跑通過。</span><span class="en">Anyone can say "it's safe". Each line below names how it's enforced and the evidence. The evidence column names the matching automated tests, all rerun and passing on 2026-10-12.</span></p>
+      </div>
+    </div>
+    <div class="chapter-body">
+      <div class="side"><div class="sticky"><span class="zh">✓ 已做到，證據欄寫怎麼查<br>◐ 部分做到<br>○ 規劃中，還沒做到</span><span class="en">✓ Done; the evidence column says how to check<br>◐ Partly done<br>○ Planned, not done</span></div></div>
+      <div>
+        <div class="block">
+          <div class="ledger-wrap">
+          <div class="ledger-head"><span><span class="zh">承諾</span><span class="en">Promise</span></span><span><span class="zh">怎麼做到</span><span class="en">How</span></span><span><span class="zh">證據</span><span class="en">Evidence</span></span><span><span class="zh">狀態</span><span class="en">Status</span></span></div>
+          <ol class="ledger">
+            <li>
+              <span class="claim"><span class="zh">你打的一句話送不出去</span><span class="en">A sentence you type can't be sent</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">伺服器只收 13 種動作 × 12 種對象的代碼；清單外的值、多出來的欄位一律拒收</span><span class="en">The server only accepts codes for 13 actions × 12 subjects. Anything off the list, or any extra field, is rejected</span></span>
+              <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><span class="zh">測試「清單外代碼被拒」「夾帶額外欄位被拒」「好友列表不回任何自由文字」</span><span class="en">Tests: off-list codes rejected; extra fields rejected; friend list returns no free text</span></span>
+              <span><span class="tag ok">✓ <span class="zh">已做到</span><span class="en">Done</span></span></span>
+            </li>
+            <li>
+              <span class="claim"><span class="zh">Claude 的回答和你的檔案不會被讀去分類</span><span class="en">Claude's replies and your files aren't read to pick a category</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">只看你打的字，先在你電腦上把網址、路徑、檔名、email、像金鑰的字串換成代號，再交給你本來就在用的 Claude 判斷；最多每 3 分鐘一次</span><span class="en">Only what you type is used. URLs, paths, file names, emails and key-like strings are masked on your computer first, then the Claude you already use picks a category, at most every 3 minutes</span></span>
+              <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><span class="zh">外掛裡的 16 條遮罩規則，在 repo 的 <code>mod/hooks/redact.ts</code>（還沒有自動測試）</span><span class="en">The plugin's 16 masking rules in the repo's <code>mod/hooks/redact.ts</code> (no automated test yet)</span></span>
+              <span><span class="tag ok">✓ <span class="zh">已做到</span><span class="en">Done</span></span></span>
+            </li>
+            <li>
+              <span class="claim"><span class="zh">朋友碰不到你的 Claude</span><span class="en">Friends can't reach your Claude</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">朋友的名字只畫在面板上，不進你的對話，也不進指令的輸出；就算有人把名字取成一句指令也沒用</span><span class="en">Friends' names are only drawn in the panel, never put into your conversation or command output, so a name written as an instruction does nothing</span></span>
+              <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><span class="zh">這是專案的硬規定；名字也會清掉控制字元、零寬字元、反轉文字方向的字元（測試 2 項）</span><span class="en">A hard rule of the project. Names are also stripped of control, zero-width and direction-flipping characters (2 tests)</span></span>
+              <span><span class="tag ok">✓ <span class="zh">已做到</span><span class="en">Done</span></span></span>
+            </li>
+            <li>
+              <span class="claim"><span class="zh">資料庫外流也沒人能冒充你</span><span class="en">A database leak can't be used to log in as you</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">加入時你的電腦拿到一把金鑰，伺服器只存它的 SHA-256 雜湊（像指紋：拿金鑰算得出來，從雜湊倒推不回金鑰）</span><span class="en">Your computer gets a key when you join; the server stores only its SHA-256 hash (a one-way fingerprint: easy to compute from the key, impossible to reverse)</span></span>
+              <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><span class="zh">測試「錯的金鑰被拒」「踢人後金鑰失效」</span><span class="en">Tests: wrong key rejected; key stops working after a kick</span></span>
+              <span><span class="tag ok">✓ <span class="zh">已做到</span><span class="en">Done</span></span></span>
+            </li>
+            <li>
+              <span class="claim"><span class="zh">邀請碼猜不到，外流了可以換</span><span class="en">Invites can't be guessed, and can be replaced</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">128 位元亂數；建立者打 <code>/friends rotate</code> 換新碼，舊碼立刻失效</span><span class="en">128-bit random codes. The creator types <code>/friends rotate</code> and the old code stops working</span></span>
+              <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><span class="zh">測試「錯的邀請碼被拒」「踢人後舊邀請碼失效」「非建立者不能換碼」；邀請碼也只存雜湊</span><span class="en">Tests: wrong invite rejected; old invite dies after a kick; only the creator can rotate. Invites are stored only as a hash too</span></span>
+              <span><span class="tag ok">✓ <span class="zh">已做到</span><span class="en">Done</span></span></span>
+            </li>
+            <li>
+              <span class="claim"><span class="zh">別的網站沒辦法冒用你的瀏覽器</span><span class="en">Other websites can't use your browser against the relay</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">中繼只收 <code>application/json</code> 的送出請求，其他一律回 415；網頁表單送不出這種請求</span><span class="en">The relay only accepts <code>application/json</code> POST requests and answers anything else with 415; a web form can't send that kind of request</span></span>
+              <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><span class="zh">測試「POST 不是 application/json 被拒 415」</span><span class="en">Test: non-JSON POST rejected with 415</span></span>
+              <span><span class="tag ok">✓ <span class="zh">已做到</span><span class="en">Done</span></span></span>
+            </li>
+            <li>
+              <span class="claim"><span class="zh">有流量上限，不容易灌爆</span><span class="en">Traffic limits make flooding harder</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">每次請求最多 4 KB、一個群組最多 10 人；另外同一個 IP 每分鐘約 600 次、加入每小時約 10 次，這兩個是盡力而為（每台伺服器各算各的）</span><span class="en">Requests up to 4 KB and groups up to 10 people. On top of that, about 600 requests a minute per IP and 10 join attempts an hour, best effort (each server instance counts separately)</span></span>
+              <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><span class="zh">測試「第 11 人被拒」；其他上限還沒有專門的測試</span><span class="en">Test: 11th member rejected. The other limits don't have dedicated tests yet</span></span>
+              <span><span class="tag part">◐ <span class="zh">部分做到</span><span class="en">Partly</span></span></span>
+            </li>
+            <li>
+              <span class="claim"><span class="zh">這一頁不追蹤你</span><span class="en">This page doesn't track you</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">不載入任何外部字型、腳本、分析工具；瀏覽器安全設定（CSP）只允許這個網址自己的檔案</span><span class="en">No outside fonts, scripts or analytics. The Content Security Policy only allows files from this address</span></span>
+              <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><span class="zh">看下面「自己動手查」第 1 個方法</span><span class="en">See method 1 under "Check it yourself"</span></span>
+              <span><span class="tag ok">✓ <span class="zh">已做到</span><span class="en">Done</span></span></span>
+            </li>
+            <li>
+              <span class="claim"><span class="zh">原始碼公開、誰都能讀</span><span class="en">Source code anyone can read</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">外掛和中繼的程式都放在 GitHub，每 4～5 版推一次；SECURITY.md 逐條寫出它讀什麼、送什麼，並附程式碼位置</span><span class="en">The plugin and relay code are on GitHub, pushed every 4–5 releases; SECURITY.md lists what it reads and sends, each with the code location</span></span>
+              <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><a href="https://github.com/yanneko27450/with-friends">yanneko27450/with-friends</a><span class="zh">；推上去的那一版，GitHub Actions 會用 repo 的程式重打安裝包，跟線上的 SHA-256 比對（log 印出 MATCH 才算對上）。兩次推送之間的版本，原始碼會在下一次推送時補上</span><span class="en">; for each pushed version, GitHub Actions rebuilds the package from the repo and compares it with the live SHA-256 (it counts only when the log prints MATCH). Versions between pushes get their source in the next push</span></span>
+              <span><span class="tag part">◐ <span class="zh">部分做到</span><span class="en">Partly</span></span></span>
+            </li>
+            <li>
+              <span class="claim"><span class="zh">有外部的人審過</span><span class="en">Reviewed by someone outside the project</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">正式上架前做一次獨立資安審查，報告公開在這裡</span><span class="en">An independent security review before public launch, with the report published here</span></span>
+              <span class="ev">—</span>
+              <span><span class="tag plan">○ <span class="zh">規劃中</span><span class="en">Planned</span></span></span>
+            </li>
+          </ol>
+          </div>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">自己動手查</span><span class="en">Check it yourself</span></h3>
+          <ol class="steps">
+            <li>
+              <h4><span class="zh">看這一頁的安全標頭</span><span class="en">Look at this page's security headers</span></h4>
+              <p class="measure"><span class="zh">在瀏覽器按 F12 → Network → 重新整理 → 點這一頁，Response Headers 裡會看到 <code>Content-Security-Policy</code> 寫著只允許 <code>'self'</code>。</span><span class="en">Press F12 → Network → reload → click this page. Under Response Headers, <code>Content-Security-Policy</code> only allows <code>'self'</code>.</span></p>
+            </li>
+            <li>
+              <h4><span class="zh">核對安裝檔的指紋</span><span class="en">Check the package fingerprint</span></h4>
+              <p class="measure"><span class="zh">打開 <a href="/marketplace.json">安裝清單</a>，裡面有安裝檔網址和 SHA-256。下載後在終端機跑 <code>certutil -hashfile 檔名 SHA256</code>（Windows）或 <code>shasum -a 256 檔名</code>（Mac）比對。Claude Code 安裝時也會自動比對，對不上就不裝。</span><span class="en">Open the <a href="/marketplace.json">install list</a> for the package URL and its SHA-256. After downloading, run <code>certutil -hashfile file SHA256</code> (Windows) or <code>shasum -a 256 file</code> (Mac). Claude Code checks this too and refuses a mismatch.</span></p>
+              <p class="measure small muted"><span class="zh">指紋本身只保證下載過程沒被改；要確定檔案就是公開的那份程式，看下一條。</span><span class="en">A fingerprint alone only proves the download wasn't altered. To be sure the file is the public code, see the next step.</span></p>
+            </li>
+            <li>
+              <h4><span class="zh">讀原始碼，自己重打一次</span><span class="en">Read the source and rebuild it yourself</span></h4>
+              <p class="measure"><span class="zh">原始碼在 <a href="https://github.com/yanneko27450/with-friends">GitHub</a>，先讀 SECURITY.md。想確定線上的安裝檔沒被換過，用 repo 裡的 <code>relay/worker/build_plugin.mjs</code> 在自己電腦重打一次，算出來的 SHA-256 會跟安裝清單寫的一樣。原始碼每 4～5 版才推一次，所以線上版本比 repo 新的時候會對不上，要等下一次推送。也可以直接請你的 Claude 幫你做這件事。</span><span class="en">The source is on <a href="https://github.com/yanneko27450/with-friends">GitHub</a>; start with SECURITY.md. To be sure the live package wasn't swapped, rebuild it with the repo's <code>relay/worker/build_plugin.mjs</code>: the SHA-256 will match the install list. Code is pushed every 4–5 releases, so when the live version is newer than the repo it won't match until the next push. You can ask your Claude to do this for you.</span></p>
+            </li>
+          </ol>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">朋友看到的畫面</span><span class="en">What your friends see</span></h3>
+          <div class="pane">
+            <div class="bar"><span>Friends with Claude</span><span class="muted">⤢ ✕</span></div>
+            <div class="grp"><span class="zh">Amy 的群組 · 2 位好友在線</span><span class="en">Amy's group · 2 friends online</span></div>
+            <div class="who"><span class="av av-b">B</span><div><div>Bob</div><div class="act" id="aa"></div><div class="meta" id="ma"></div></div></div>
+            <div class="who"><span class="av av-c">C</span><div><div>Cat</div><div class="act" id="ab"></div><div class="meta" id="mb"></div></div></div>
+            <div class="who me"><span class="av av-a">A</span><div><div>Amy <span class="muted"><span class="zh">（你）</span><span class="en">(you)</span></span></div><div class="meta"><span class="zh">朋友看到：寫功能 · 網站</span><span class="en">Friends see: Building features · a website</span></div></div></div>
+          </div>
+          <p class="small muted"><span class="zh">示範畫面，名字都是假的。</span><span class="en">Demo panel with made-up names.</span></p>
+          <details>
+            <summary><span class="zh">看整張分類清單</span><span class="en">See the full category list</span></summary>
+            <p class="small muted"><span class="zh">動作</span><span class="en">Actions</span></p><div class="chips" id="actions"></div>
+            <p class="small muted"><span class="zh">對象</span><span class="en">Subjects</span></p><div class="chips" id="subjects"></div>
+          </details>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">加入前要知道的限制</span><span class="en">Limits to know before you join</span></h3>
+          <div class="callout">
+            <ul class="plain">
+              <li><span class="zh">中繼的管理者看得到每個人的名字、在不在線、分類、時間和 IP；對話內容看不到，因為根本沒傳上來。官方中繼（這頁的網址）由本專案的開發者管理；別人自己架的中繼由那個人管理。</span><span class="en">The relay operator can see each member's name, status, category, timing and IP address, but not conversations, which are never sent. The official relay (this address) is run by this project's developer; a self-hosted relay is run by whoever set it up.</span></li>
+              <li><span class="zh">朋友看得到你「幾分鐘前開始」，所以大概知道你什麼時候在用 Claude。</span><span class="en">Friends see how long ago you started, so they can roughly tell when you use Claude.</span></li>
+              <li><span class="zh">邀請那一行請不要轉傳，拿到的人都能加入。群組裡每個人都能從面板複製邀請碼再邀人；建立者可以用 <code>/friends remove 名字</code> 移除一位朋友（移除成功後會同時換新的邀請碼），也可以只打 <code>/friends rotate</code> 換新碼，擋掉之後還沒加入的人。</span><span class="en">Don't forward the invite line: anyone who has it can join. Every member can copy the invite from the panel and invite others. The creator can remove a friend with <code>/friends remove &lt;name&gt;</code> (a successful removal also replaces the invite), or just type <code>/friends rotate</code> for a new invite, which stops people who haven't joined.</span></li>
+              <li><span class="zh">官方中繼的網址是 <code>friends-status-relay.friends-status-relay.workers.dev</code>。邀請連結如果是別的網址，代表那個群組用的是別人自己架的中繼，資料在那個人手上。</span><span class="en">The official relay is <code>friends-status-relay.friends-status-relay.workers.dev</code>. If an invite points somewhere else, that group uses a relay someone set up themselves, and the data is in their hands.</span></li>
+              <li><span class="zh">用手機遙控電腦上的對話時，外掛照樣在跑、照樣分享，只是手機上看不到面板。</span><span class="en">If you drive a computer conversation from your phone, the plugin still runs and shares; you just can't see the panel.</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 資料庫 -->
+  <section class="chapter" id="data" aria-labelledby="h-data">
+    <div class="chapter-head">
+      <div class="no">02</div>
+      <div>
+        <h2 id="h-data"><span class="zh">資料庫怎麼管</span><span class="en">How data is stored</span></h2>
+        <p class="measure muted"><span class="zh">只有一台伺服器，叫「中繼」：它只負責在你和朋友之間轉送狀態，每個群組一個很小的資料庫。沒有別的伺服器，也沒有分析或廣告工具。</span><span class="en">There's one server, the relay: it only passes statuses between you and your friends, with one tiny database per group. No other servers, and no analytics or ad tools.</span></p>
+      </div>
+    </div>
+    <div class="chapter-body">
+      <div class="side"><div class="sticky"><span class="zh">放在 Cloudflare 的免費方案，每月 0 元。</span><span class="en">Runs on Cloudflare's free plan, $0 a month.</span></div></div>
+      <div>
+        <div class="block">
+          <h3><span class="zh">資料走哪條路</span><span class="en">Where the data travels</span></h3>
+          <div class="arch">
+            <div class="node"><b><span class="zh">你的電腦</span><span class="en">Your computer</span></b><span class="zh">Claude＋外掛</span><span class="en">Claude + plugin</span></div>
+            <div class="link">HTTPS</div>
+            <div class="node relay"><b><span class="zh">中繼（Cloudflare Workers）</span><span class="en">Relay (Cloudflare Workers)</span></b><span class="zh">檢查格式、限流，只轉送清單內代碼</span><span class="en">Checks format and rate, forwards only list codes</span>
+              <div class="db"><span><span class="zh">群組 A 資料庫</span><span class="en">Group A db</span></span><span><span class="zh">群組 B 資料庫</span><span class="en">Group B db</span></span><span>…</span></div>
+            </div>
+            <div class="link">HTTPS</div>
+            <div class="node"><b><span class="zh">朋友的電腦</span><span class="en">Friends' computers</span></b><span class="zh">Claude＋外掛</span><span class="en">Claude + plugin</span></div>
+          </div>
+          <p class="measure small muted"><span class="zh">每個群組是一個 Durable Object，裡面是一個 SQLite 資料庫；不同群組彼此看不到。</span><span class="en">Each group is one Durable Object holding a SQLite database. Groups can't see each other.</span></p>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">存了什麼、存多久</span><span class="en">What's stored, and for how long</span></h3>
+          <table class="tbl">
+            <thead><tr><th><span class="zh">資料</span><span class="en">Data</span></th><th><span class="zh">存在哪</span><span class="en">Where</span></th><th><span class="zh">存多久</span><span class="en">How long</span></th><th><span class="zh">誰看得到</span><span class="en">Who can see it</span></th></tr></thead>
+            <tbody>
+              <tr><td><span class="zh">名字</span><span class="en">Name</span></td><td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫</span><span class="en">Group database</span></td><td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">到你退出</span><span class="en">Until you leave</span></td><td><span class="k"><span class="zh">誰看得到</span><span class="en">Who</span></span><span class="zh">群組成員、管理者</span><span class="en">Members, operator</span></td></tr>
+              <tr><td><span class="zh">金鑰雜湊</span><span class="en">Key hash</span></td><td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫</span><span class="en">Group database</span></td><td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">到你退出</span><span class="en">Until you leave</span></td><td><span class="k"><span class="zh">誰看得到</span><span class="en">Who</span></span><span class="zh">只有伺服器拿來比對</span><span class="en">Only the server, to compare</span></td></tr>
+              <tr><td><span class="zh">分類＋開始時間</span><span class="en">Category + start time</span></td><td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫</span><span class="en">Group database</span></td><td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="num">24 h</span></td><td><span class="k"><span class="zh">誰看得到</span><span class="en">Who</span></span><span class="zh">群組成員、管理者</span><span class="en">Members, operator</span></td></tr>
+              <tr><td><span class="zh">外掛版本號</span><span class="en">Plugin version</span></td><td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫；只收 0.4.0 這種數字格式，其他一律拒收</span><span class="en">Group database; only digits like 0.4.0 are accepted, anything else is rejected</span></td><td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">到你退出</span><span class="en">Until you leave</span></td><td><span class="k"><span class="zh">誰看得到</span><span class="en">Who</span></span><span class="zh">群組成員（用來提醒誰還在用舊版）、管理者</span><span class="en">Members (to flag who is on an old version), operator</span></td></tr>
+              <tr><td><span class="zh">最後上線時間</span><span class="en">Last seen time</span></td><td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫</span><span class="en">Group database</span></td><td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">到你退出</span><span class="en">Until you leave</span></td><td><span class="k"><span class="zh">誰看得到</span><span class="en">Who</span></span><span class="zh">群組成員、管理者</span><span class="en">Members, operator</span></td></tr>
+              <tr><td><span class="zh">工作中／閒置／離線</span><span class="en">Working / idle / offline</span></td><td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">只在記憶體，不寫進資料庫</span><span class="en">Memory only, never written</span></td><td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">伺服器重開就沒了</span><span class="en">Gone on restart</span></td><td><span class="k"><span class="zh">誰看得到</span><span class="en">Who</span></span><span class="zh">群組成員</span><span class="en">Members</span></td></tr>
+              <tr><td><span class="zh">邀請碼雜湊</span><span class="en">Invite hash</span></td><td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫</span><span class="en">Group database</span></td><td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">到換新碼或群組刪除</span><span class="en">Until rotated or group deleted</span></td><td><span class="k"><span class="zh">誰看得到</span><span class="en">Who</span></span><span class="zh">伺服器只拿雜湊來比對；邀請碼本身存在每個成員的電腦上（面板可以複製）</span><span class="en">The server only compares hashes; the invite itself is kept on every member's computer (the panel can copy it)</span></td></tr>
+              <tr><td><span class="zh">查新版的請求</span><span class="en">Update checks</span></td><td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">不寫進資料庫；每次開對話向中繼讀一次安裝清單</span><span class="en">Not written to a database; the install list is read once per conversation</span></td><td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">不保存（Cloudflare 處理連線時看得到）</span><span class="en">Not kept (Cloudflare sees the connection)</span></td><td><span class="k"><span class="zh">誰看得到</span><span class="en">Who</span></span><span class="zh">管理者、Cloudflare：看得到 IP 和時間，退出群組也會繼續</span><span class="en">Operator, Cloudflare: IP and time, even after you leave a group</span></td></tr>
+              <tr><td>IP</td><td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">只在記憶體裡算短時間內的請求次數（限流），不寫進資料庫</span><span class="en">Only counted in memory for rate limits, never written to a database</span></td><td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">以 1 分鐘（一般請求）或 1 小時（加入）為一窗計算</span><span class="en">Counted per 1-minute (requests) or 1-hour (joins) window</span></td><td><span class="k"><span class="zh">誰看得到</span><span class="en">Who</span></span><span class="zh">Cloudflare 處理連線時看得到</span><span class="en">Cloudflare, as it handles the connection</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">一筆資料的一生</span><span class="en">The life of your data</span></h3>
+          <ol class="life">
+            <li><span class="when">t = 0</span><b><span class="zh">加入</span><span class="en">Join</span></b><span class="zh">存下名字和金鑰雜湊</span><span class="en">Name and key hash saved</span></li>
+            <li><span class="when"><span class="zh">每次換事做</span><span class="en">on change</span></span><b><span class="zh">送分類</span><span class="en">New category</span></b><span class="zh">只有分類換了才寫進資料庫</span><span class="en">Written only when it changes</span></li>
+            <li><span class="when">+24 h</span><b><span class="zh">分類過期</span><span class="en">Category expires</span></b><span class="zh">沒人讀也會自動清掉</span><span class="en">Cleared even if nobody reads it</span></li>
+            <li><span class="when"><span class="zh">你退出</span><span class="en">you leave</span></span><b><span class="zh">刪掉你</span><span class="en">You're deleted</span></b><span class="zh">群組沒人了整組刪掉</span><span class="en">An empty group is deleted</span></li>
+            <li><span class="when">+30 d</span><b><span class="zh">備份到期</span><span class="en">Backup ends</span></b><span class="zh">Cloudflare 的時間回溯功能 30 天內還能還原</span><span class="en">Cloudflare point-in-time recovery can restore for 30 days</span></li>
+          </ol>
+          <p class="measure small muted mt"><span class="zh">證據：測試「過期後沒人來讀，資料庫裡的動態也已經清掉」「離開群組後，資料庫裡找不到這個人」「重開後在線狀態沒存」。</span><span class="en">Evidence: tests "expired activity is gone from the database even unread", "after leaving, the database has no trace of the person", "online state isn't persisted across restarts".</span></p>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">誰在管</span><span class="en">Who runs it</span></h3>
+          <p class="measure"><span class="zh">官方中繼由本專案的開發者一個人維護，放在 Cloudflare。不想信任別人的話，群組建立者可以用自己的 Cloudflare 帳號架一份（免費、約 5 分鐘），資料就只在自己的帳號裡；步驟在 repo 的 <code>relay/DEPLOY.md</code>。</span><span class="en">The official relay is maintained by this project's developer on Cloudflare. If you'd rather not trust anyone else, a group creator can deploy their own copy on their own Cloudflare account (free, about 5 minutes), so the data stays in their account. The steps are in the repo's <code>relay/DEPLOY.md</code>.</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 版本 -->
+  <section class="chapter" id="versions" aria-labelledby="h-ver">
+    <div class="chapter-head">
+      <div class="no">03</div>
+      <div>
+        <h2 id="h-ver"><span class="zh">版本與更新</span><span class="en">Versions and updates</span></h2>
+        <p class="measure muted"><span class="zh">有新版時面板會告訴你。要不要讓它自己更新，加入群組時由你決定，之後隨時能改。</span><span class="en">The panel tells you when there's a new version. Whether it updates itself is your choice when you join, and you can change it any time.</span></p>
+      </div>
+    </div>
+    <div class="chapter-body">
+      <div class="side"><div class="sticky"><span class="zh">目前版本</span><span class="en">Current version</span><br><b class="num bigver" id="ver2">0.4.0</b></div></div>
+      <div>
+        <div class="block">
+          <h3><span class="zh">我們怎麼發一個新版</span><span class="en">How a release is made</span></h3>
+          <ol class="flow">
+            <li><b>1 · <span class="zh">改版本號</span><span class="en">Bump the version</span></b><span class="zh">外掛設定檔的版本號加一</span><span class="en">The plugin's version number goes up</span></li>
+            <li><b>2 · <span class="zh">跑測試</span><span class="en">Run the tests</span></b><span class="zh">發版前跑伺服器 25 項和外掛測試</span><span class="en">The 25 server tests and the plugin tests are run before release</span></li>
+            <li><b>3 · <span class="zh">打包算指紋</span><span class="en">Package and fingerprint</span></b><span class="zh">產生 zip 和它的 SHA-256</span><span class="en">Build the zip and its SHA-256</span></li>
+            <li><b>4 · <span class="zh">部署</span><span class="en">Deploy</span></b><span class="zh">安裝清單換成新版本號</span><span class="en">The install list points to the new version</span></li>
+          </ol>
+          <p class="measure small muted"><span class="zh">版本號沒變的話，Claude Code 不會當成新版，所以每次發佈都換一個新號碼。</span><span class="en">Claude Code only treats it as a new version when the number changes, so every release gets a new number.</span></p>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">你怎麼更新</span><span class="en">How you update</span></h3>
+          <p class="measure"><span class="zh">從 0.3.1 起，外掛會自己去安裝它的地方查有沒有新版。查到之後怎麼做，看你選哪一種：</span><span class="en">From 0.3.1 on, the plugin checks where it was installed from for a new version. What happens next depends on your choice:</span></p>
+          <div class="choices">
+            <div class="choice">
+              <h4><span class="zh">讓它自己更新</span><span class="en">Let it update itself</span></h4>
+              <p><span class="zh">建立或加入群組後會問你一次。選「要，自動更新」之後，外掛會在背景跑 Claude Code 官方的兩條更新指令，下次開新對話就是新版。它不會去改你的 Claude 設定檔。</span><span class="en">You're asked once after creating or joining a group. If you choose "Yes, update automatically", the plugin runs Claude Code's two official update commands in the background, and your next new conversation uses the new version. It doesn't edit your Claude settings files.</span></p>
+              <p class="small muted"><span class="zh">隨時改：<code>/friends autoupdate on</code> 或 <code>off</code></span><span class="en">Change any time: <code>/friends autoupdate on</code> or <code>off</code></span></p>
+            </div>
+            <div class="choice">
+              <h4><span class="zh">有新版時再決定</span><span class="en">Decide each time</span></h4>
+              <p><span class="zh">面板會出現「有新版」和「更新」按鈕，按了才更新；也可以打 <code>/friends update</code>。</span><span class="en">The panel shows "new version" with an Update button, and only updates when you press it. You can also type <code>/friends update</code>.</span></p>
+            </div>
+          </div>
+          <div class="callout"><p><span class="zh">還在用 0.3.0 的人，外掛沒有查新版的功能，要手動更新一次：請 Claude 依序跑下面兩條，再開一個新對話。</span><span class="en">If you're still on 0.3.0, it can't check for updates yet, so update by hand once: ask Claude to run these two, then start a new conversation.</span></p></div>
+          <div class="cmd"><code id="u1">claude plugin marketplace update with-friends</code><button class="copy" type="button" data-copy="u1"><span class="zh">複製</span><span class="en">Copy</span></button></div>
+          <div class="cmd"><code id="u2">claude plugin update with-friends@with-friends</code><button class="copy" type="button" data-copy="u2"><span class="zh">複製</span><span class="en">Copy</span></button></div>
+          <p class="measure small muted"><span class="zh">自動更新比較方便，但每一次更新，都等於再相信一次管理者當時放上去的版本。想自己把關，就選「有新版時再決定」，先看下面的更新紀錄再按。</span><span class="en">Auto-update is easier, but every update means trusting whatever the operator published at that moment. To review first, choose "decide each time" and read the history below before pressing Update.</span></p>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">更新紀錄</span><span class="en">Release history</span></h3>
+          <table class="tbl">
+            <thead><tr><th><span class="zh">版本</span><span class="en">Version</span></th><th><span class="zh">日期</span><span class="en">Date</span></th><th><span class="zh">改了什麼</span><span class="en">What changed</span></th></tr></thead>
+            <tbody>
+              <tr><td class="num">0.4.0</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">面板改版：每位朋友一張三行卡，離線的人收進灰色框；沒加入群組時面板上就能建立群組；右下角顯示自己的版本。外掛會送自己的版本號，面板標出還在用舊版的朋友。自動更新失敗會隔 1 小時再試，最多 3 次。安全：中繼只收 application/json 的請求，別的網站沒辦法借你的瀏覽器塞假成員。</span><span class="en">Redesigned panel: a three-line card per friend, with offline friends in a grey box; create a group right from the panel; your own version in the corner. The plugin sends its version so the panel can flag friends on an old one. A failed auto-update retries every hour, up to 3 times. Security: the relay only accepts application/json requests, so other websites can't use your browser to add fake members.</span></td></tr>
+              <tr><td class="num">0.3.4</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">外掛功能沒變：邀請文字和說明頁多一句「需要電腦上的 Claude Code；只用 Chat 的話先不用裝，等網頁版」。</span><span class="en">No change to what the plugin does: the invite and this page now say it needs Claude Code on a computer, and Chat-only users should wait for the web version.</span></td></tr>
+              <tr><td class="num">0.3.3</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">外掛功能沒變：原始碼公開到 GitHub；邀請文字附 repo 網址讓朋友的 Claude 先查再裝、提醒開本機對話、第 2 步改成把邀請貼進右邊的框；安裝包可以重打出同一個 SHA-256。</span><span class="en">No change to what the plugin does: the source went public on GitHub; the invite links to it so your friend's Claude can check first, reminds them to use a local conversation, and step 2 now pastes the invite into the panel. The package can be rebuilt to the same SHA-256.</span></td></tr>
+              <tr><td class="num">0.3.2</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">面板加「離開群組」按鈕（會先確認）；語言自動跟著桌面版；複製邀請碼時可以附另一種語言的安裝步驟。</span><span class="en">A "Leave group" button in the panel (asks first); the language follows the desktop app; "Copy invite" can include install steps in the other language.</span></td></tr>
+              <tr><td class="num">0.3.1</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">外掛會自己查新版：面板的更新按鈕、<code>/friends update</code>、可選的自動更新。預設中繼改成官方中繼；英文面板標題改成 Friends with Claude；找不到 claude 指令時的備案路徑。安全：中繼回的錯誤文字不再顯示在對話裡（防止用文字騙 Claude 做事）。伺服器資料沒動。</span><span class="en">The plugin checks for new versions: an Update button in the panel, <code>/friends update</code>, and optional auto-update. The default relay is now the official one; the English panel title is Friends with Claude; a fallback path when the claude command isn't found. Security: the relay's error text no longer appears in the conversation (so it can't be used to trick Claude). No server data changed.</span></td></tr>
+              <tr><td class="num">0.3.0</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">改名 Friends with Claude（外掛 id <code>with-friends</code>，指令 <code>/friends</code> 不變）；按「複製邀請碼」會先問朋友裝好了沒。伺服器資料沒動。</span><span class="en">Renamed to Friends with Claude (plugin id <code>with-friends</code>; the <code>/friends</code> command is unchanged). "Copy invite" now first asks whether your friend has installed it. No server data changed.</span></td></tr>
+              <tr><td class="num">0.2.0</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">一條指令加入群組，名字用問答框問；第一次開對話會自動打開面板。</span><span class="en">Join with one command and get asked for your name; the panel opens by itself the first time.</span></td></tr>
+              <tr><td class="num">0.1.0</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-11</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">第一版，給朋友小範圍試用。</span><span class="en">First version, for a small trial with friends.</span></td></tr>
+            </tbody>
+          </table>
+          <p class="measure small muted mt"><span class="zh">規劃中：每一版另外標出「安全相關」的修正。</span><span class="en">Planned: marking security fixes separately in every release.</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 安裝 -->
+  <section class="chapter" id="install" aria-labelledby="h-inst">
+    <div class="chapter-head">
+      <div class="no">04</div>
+      <div>
+        <h2 id="h-inst"><span class="zh">安裝與移除</span><span class="en">Install and remove</span></h2>
+        <p class="measure muted"><span class="zh">需要電腦上的 Claude Code 2.1.295 以上：Claude 桌面版的 Code 分頁，或在終端機開 claude（桌面版更新到最新就好；不確定就打 <code>/status</code> 看）。只用 Chat（claude.ai 網頁、Chat 分頁、手機 App）的話先不用裝，等網頁版。</span><span class="en">Needs Claude Code 2.1.295 or newer on a computer: the Code tab of the Claude desktop app, or claude in a terminal (updating the desktop app is enough; type <code>/status</code> to check). If you only use Chat (claude.ai, the Chat tab, or the phone app), skip this for now and wait for the web version.</span></p>
+      </div>
+    </div>
+    <div class="chapter-body">
+      <div class="side"><div class="sticky"><span class="zh">朋友傳給你的邀請訊息裡已經有這些步驟。</span><span class="en">The invite your friend sent already includes these steps.</span></div></div>
+      <div>
+        <div class="block">
+          <ol class="steps">
+            <li>
+              <h4><span class="zh">開一個「本機」對話，把這段話傳給 Claude</span><span class="en">Open a local conversation and send this to Claude</span></h4>
+              <p class="measure"><span class="zh">在桌面版 Code 分頁開對話時，選你自己電腦上的資料夾，不要選雲端：雲端環境連不到中繼，面板也只會出現在你自己的電腦上（有朋友在雲端裝不起來，換本機就好了）。只貼這一段，不要把朋友的整則訊息貼給 Claude：裡面的邀請碼等第 2 步才用，而且是貼進面板交給外掛，不讓 Claude 讀。外掛會用你電腦的權限執行，所有 Claude 外掛都是這樣。</span><span class="en">In the desktop app's Code tab, pick a folder on your own computer, not a cloud session: cloud sessions can't reach the relay, and the panel only shows on your computer (a friend who tried in the cloud got it working by switching to local). Send only this paragraph, not your friend's whole message: the invite is for step 2, where it goes into the panel for the plugin, not to Claude. Like every Claude plugin, it runs with your computer's permissions.</span></p>
+              <div class="say">
+                <p id="say-zh">請幫我安裝 Claude Code 外掛「Friends with Claude」。原始碼公開在 https://github.com/yanneko27450/with-friends（SECURITY.md 寫了它讀什麼、送什麼），可以先看；安裝包能用那個 repo 的 relay/worker/build_plugin.mjs 重新打出來，sha256 跟 marketplace.json 寫的一樣。要裝的話依序執行這兩個指令：claude plugin marketplace add https://friends-status-relay.friends-status-relay.workers.dev/marketplace.json 然後 claude plugin install with-friends@with-friends。找不到 claude 指令的話，用 Claude 桌面版內附的那一支：Windows 在 %APPDATA%\Claude\claude-code\&lt;版本&gt;\&lt;資料夾&gt;\claude.exe，挑最新的版本（PowerShell 裡到 $env:APPDATA\Claude\claude-code 底下找）；用 Bash 的話，完整路徑在環境變數 CLAUDE_CODE_EXECPATH 裡。裝好跟我說。</p>
+                <p id="say-en" hidden>Please install the Claude Code plugin Friends with Claude for me. Its source code is public at https://github.com/yanneko27450/with-friends (SECURITY.md says what it reads and what it sends), so you can look first; the install package can be rebuilt with relay/worker/build_plugin.mjs from that repo and gets the same sha256 as marketplace.json. To install, run these two commands: claude plugin marketplace add https://friends-status-relay.friends-status-relay.workers.dev/marketplace.json and then claude plugin install with-friends@with-friends. If the claude command isn't found, use the claude that comes with the Claude desktop app: on Windows it's the newest %APPDATA%\Claude\claude-code\&lt;version&gt;\&lt;folder&gt;\claude.exe (in PowerShell, look under $env:APPDATA\Claude\claude-code), and in Bash its full path is in the CLAUDE_CODE_EXECPATH environment variable. Tell me when it's done.</p>
+                <button class="copy" type="button" data-copy="say-zh" data-copy-en="say-en"><span class="zh">複製</span><span class="en">Copy</span></button>
+              </div>
+            </li>
+            <li>
+              <h4><span class="zh">把邀請那一行貼進右邊的框</span><span class="en">Paste the invite line into the panel</span></h4>
+              <p class="measure"><span class="zh">裝好之後，右邊會自己跳出 Friends with Claude 的框。把朋友給你的那一行（長得像 <code>/friends join https://friends-status-relay…#xxxx</code>）貼進框裡，不是貼進對話。沒跳出來的話，開一個新對話、只傳那一行。</span><span class="en">Once installed, a Friends with Claude pane opens on the right by itself. Paste the line your friend sent (it looks like <code>/friends join https://friends-status-relay…#xxxx</code>) into the box there, not into the chat. If no pane opens, start a new conversation and send only that line.</span></p>
+            </li>
+            <li>
+              <h4><span class="zh">取一個名字</span><span class="en">Pick a name</span></h4>
+              <p class="measure"><span class="zh">它會問你要叫什麼名字，填完就加入了。之後打 <code>/friends</code> 就能再打開面板。</span><span class="en">It asks what name to show; fill it in and you're in. Type <code>/friends</code> to bring the panel back later.</span></p>
+            </li>
+          </ol>
+          <details>
+            <summary><span class="zh">你的 Claude 不肯裝的話</span><span class="en">If your Claude won't install it</span></summary>
+            <p class="measure"><span class="zh">Claude 對來路不明的外掛謹慎是好事。上面那段話已經附了原始碼和重打安裝包的方法，可以請它先讀 SECURITY.md、重打一次比對指紋，確認沒問題再裝。還是不放心的話，自己在終端機跑下面兩行也可以。</span><span class="en">It's good that Claude is careful with unknown plugins. The paragraph above already points to the source and the rebuild step, so you can ask it to read SECURITY.md and rebuild the package to compare fingerprints before installing. Or run the two lines below in a terminal yourself.</span></p>
+          </details>
+          <details>
+            <summary><span class="zh">自己在終端機安裝</span><span class="en">Install from a terminal yourself</span></summary>
+            <p class="measure"><span class="zh">有終端機版 Claude 的話，自己跑這兩行，再接第 2 步：</span><span class="en">With the terminal version of Claude, run these two lines yourself, then continue from step 2:</span></p>
+            <div class="cmd"><code id="i1">claude plugin marketplace add https://friends-status-relay.friends-status-relay.workers.dev/marketplace.json</code><button class="copy" type="button" data-copy="i1"><span class="zh">複製</span><span class="en">Copy</span></button></div>
+            <div class="cmd"><code id="i2">claude plugin install with-friends@with-friends</code><button class="copy" type="button" data-copy="i2"><span class="zh">複製</span><span class="en">Copy</span></button></div>
+          </details>
+          <details>
+            <summary><span class="zh">想自己開一個群組</span><span class="en">Starting your own group</span></summary>
+            <p class="measure"><span class="zh">裝好後在新對話依序打 <code>/friends relay https://friends-status-relay.friends-status-relay.workers.dev</code> 和 <code>/friends create 你的名字</code>，再到面板按「複製邀請碼」。</span><span class="en">After installing, type <code>/friends relay https://friends-status-relay.friends-status-relay.workers.dev</code> then <code>/friends create your-name</code> in a new conversation, and press "Copy invite" in the panel.</span></p>
+          </details>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">不想被看到的時候</span><span class="en">When you'd rather not be seen</span></h3>
+          <table class="tbl">
+            <thead><tr><th><span class="zh">指令</span><span class="en">Command</span></th><th><span class="zh">效果</span><span class="en">What it does</span></th></tr></thead>
+            <tbody>
+              <tr><td><code>/friends pause</code></td><td><span class="k"><span class="zh">效果</span><span class="en">What it does</span></span><span class="zh">暫停分享：朋友只看得到工作中、閒置或離線，看不到分類。所有對話都有效，打 <code>/friends resume</code> 恢復。</span><span class="en">Pauses sharing: friends only see working, idle or offline, no category. Applies to all conversations until <code>/friends resume</code>.</span></td></tr>
+              <tr><td><code>/friends hide</code></td><td><span class="k"><span class="zh">效果</span><span class="en">What it does</span></span><span class="zh">在目前這個資料夾裡做的事，朋友只看到「在忙」。</span><span class="en">For work in the current folder, friends only see "Working".</span></td></tr>
+              <tr><td><code>/friends leave</code></td><td><span class="k"><span class="zh">效果</span><span class="en">What it does</span></span><span class="zh">退出群組，伺服器上你的資料立刻刪掉。面板上的「離開群組」按鈕是同一件事。</span><span class="en">Leaves the group and deletes your data on the server right away. The panel's "Leave group" button does the same.</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">管理群組與名字</span><span class="en">Managing the group and your name</span></h3>
+          <table class="tbl">
+            <thead><tr><th><span class="zh">指令</span><span class="en">Command</span></th><th><span class="zh">效果</span><span class="en">What it does</span></th></tr></thead>
+            <tbody>
+              <tr><td><code><span class="zh">/friends remove 名字</span><span class="en">/friends remove &lt;name&gt;</span></code></td><td><span class="k"><span class="zh">效果</span><span class="en">What it does</span></span><span class="zh">只有群組建立者可以移除朋友。移除前會先問一次，確認才會移除；移除成功後會同時換新的邀請碼，舊的邀請碼就不能再用。</span><span class="en">Only the group creator can remove a friend. You are asked to confirm first. When the removal succeeds, the invite is replaced too, so the old invite stops working.</span> <span class="zh">被移除的人下次連線時，面板會顯示他已不在群組。如果畫面顯示「結果可能已經生效」，請重新整理，再換一次邀請碼。</span><span class="en">The removed person's panel shows they are no longer in the group the next time it connects. If the screen says the result may already have taken effect, refresh and then replace the invite once more.</span></td></tr>
+              <tr><td><code><span class="zh">/friends name 新名字</span><span class="en">/friends name &lt;new name&gt;</span></code></td><td><span class="k"><span class="zh">效果</span><span class="en">What it does</span></span><span class="zh">改名字：1～20 個字，不能含控制字元或會改變文字方向的字元。改好後，群組裡的朋友會看到新名字；</span><span class="en">Change name: 1 to 20 characters, with no control characters or characters that change text direction. Friends in the group then see the new name.</span> <span class="zh">名字和群組名是外掛唯一會送出的自由文字。每個人改名後要等 60 秒才能再改。</span><span class="en">Your name and the group name are the only free text the plugin sends. After a change you must wait 60 seconds before changing it again.</span></td></tr>
+            </tbody>
+          </table>
+          <p class="measure"><span class="zh">面板上也有對應的按鈕：朋友名單旁的「移除」，和改自己名字用的「改名字」，做的和上面兩個指令是同一件事。</span><span class="en">The pane has buttons for the same things: "Remove" next to a friend's name, and "Change name" for your own name.</span></p>
+        </div>
+
+        <div class="block">
+          <h3><span class="zh">完整移除</span><span class="en">Removing it completely</span></h3>
+          <p class="measure"><span class="zh">先打 <code>/friends leave</code> 退出，再請 Claude 跑下面兩條。沒退出就移除的話，你的名字會留在伺服器上。</span><span class="en">First type <code>/friends leave</code>, then ask Claude to run the two commands below. If you uninstall without leaving, your name stays on the server.</span></p>
+          <div class="cmd"><code id="r1">claude plugin uninstall with-friends@with-friends</code><button class="copy" type="button" data-copy="r1"><span class="zh">複製</span><span class="en">Copy</span></button></div>
+          <div class="cmd"><code id="r2">claude plugin marketplace remove with-friends</code><button class="copy" type="button" data-copy="r2"><span class="zh">複製</span><span class="en">Copy</span></button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 規劃中 -->
+  <section class="chapter" id="explore" aria-labelledby="h-exp">
+    <div class="chapter-head">
+      <div class="no">05</div>
+      <div>
+        <h2 id="h-exp"><span class="zh">探索群組</span><span class="en">Discover groups</span> <span class="tag plan"><span class="zh">規劃中</span><span class="en">Planned</span></span></h2>
+        <p class="measure muted"><span class="zh">之後想讓群組可以選擇公開，讓其他人找得到、申請加入。現在還沒做，也還沒決定細節。</span><span class="en">One idea for later: letting a group choose to be public so others can find it and ask to join. Not built, and the details aren't decided.</span></p>
+      </div>
+    </div>
+    <div class="chapter-body">
+      <div class="side"></div>
+      <div class="later-box">
+        <p class="measure"><span class="zh">開始做之前會先回答這幾件事，並更新這一頁：</span><span class="en">Before any work starts, these will be answered and this page updated:</span></p>
+        <ul class="measure plain">
+          <li><span class="zh">公開一律要群組自己選，預設不公開。</span><span class="en">Going public is always the group's choice; groups are private by default.</span></li>
+          <li><span class="zh">公開的群組會多露出什麼（群組名、人數？），寫進上面的資料標籤。</span><span class="en">What a public group reveals (its name, its size?) gets added to the data label above.</span></li>
+          <li><span class="zh">申請加入要建立者同意，邀請碼不會因此公開。</span><span class="en">Joining needs the creator's approval; invites never become public.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
 </div>
+</main>
 
-<div class="hero">
-  <h1><span class="zh">看朋友在不在線、<br>在用 Claude 做什麼</span><span class="en">See what your friends<br>are up to with Claude</span></h1>
-  <p class="lede zh">Friends with Claude 是一個 Claude Code 外掛。裝了之後，Claude 旁邊會多一個小面板，看得到群組裡<b>誰在線上、在用 Claude 弄哪一類東西</b>，有點像 Discord 顯示朋友在玩什麼遊戲。<b>對話內容不會分享出去。</b></p>
-  <p class="lede en">Friends with Claude is a Claude Code plugin. It adds a small panel next to Claude that shows <b>which friends in your group are online and what kind of thing they're working on</b>, a bit like Discord showing what game your friends are playing. <b>Your conversations are never shared.</b></p>
-
-  <div class="pane" aria-label="示範面板 / demo panel">
-    <div class="pane-h"><span>Friends with Claude</span><span aria-hidden="true">⤢ ✕</span></div>
-    <div><span class="grp zh">Amy 的群組</span><span class="grp en">Amy's group</span> <span class="muted small">· <span id="online">2</span> <span class="zh">位好友在線</span><span class="en">friends online</span></span></div>
-    <div class="faces">
-      <div class="face"><div class="av c-bob" id="fa">B</div>Bob</div>
-      <div class="face"><div class="av idle c-cat" id="fb">C</div>Cat</div>
-      <div class="face"><div class="av off">D</div>Dan</div>
-    </div>
-    <div class="sub"><span class="zh">最近在做</span><span class="en">Recent activity</span></div>
-    <div class="item"><div class="av c-bob" id="ia">B</div><p><b>Bob</b>&nbsp; <span class="act" id="aa"></span><br><span class="meta" id="ma"></span></p></div>
-    <div class="item"><div class="av idle c-cat" id="ib">C</div><p><b>Cat</b>&nbsp; <span class="act" id="ab"></span><br><span class="meta" id="mb"></span></p></div>
-    <div class="item"><div class="av c-amy">A</div><p><b>Amy <span class="zh">（你）</span><span class="en">(you)</span></b><br><span class="meta zh">朋友看到：寫功能 · 網站</span><span class="meta en">Friends see: Building features · a website</span></p></div>
-    <div class="pane-f"><span class="zh">暫停分享</span><span class="en">Pause sharing</span><span class="zh">複製邀請碼</span><span class="en">Copy invite</span></div>
+<footer>
+  <div class="wrap">
+    <p class="measure"><span class="zh">原始碼與資安說明：<a href="https://github.com/yanneko27450/with-friends">github.com/yanneko27450/with-friends</a>（SECURITY.md）。聯絡或回報問題：在 repo 開 issue，不要貼你自己的邀請連結。<br>做法參考了 SaharCarmel/claude-who 和 chrisluo5311/squad-chat（兩個都是 MIT 授權）。這是第三方外掛，不是 Anthropic 的產品。本頁內容寫於 2026-10-12。</span><span class="en">Source and security notes: <a href="https://github.com/yanneko27450/with-friends">github.com/yanneko27450/with-friends</a> (SECURITY.md). To get in touch or report a problem, open an issue there, and don't paste your own invite link.<br>Ideas borrowed from SaharCarmel/claude-who and chrisluo5311/squad-chat (both MIT licensed). A third-party plugin, not an Anthropic product. Page written 2026-10-12.</span></p>
   </div>
-  <div class="demo zh">示範畫面，名字都是假的</div><div class="demo en">Demo panel with made-up names</div>
-
-  <div class="cta">
-    <a class="btn main" href="#shared"><span class="zh">它會傳什麼出去</span><span class="en">What it sends</span></a>
-    <a class="btn" href="#security"><span class="zh">安全嗎</span><span class="en">Is it safe?</span></a>
-    <a class="btn" href="#install"><span class="zh">怎麼裝</span><span class="en">How to install</span></a>
-  </div>
-  <p class="note zh">只有電腦上看得到：Claude 桌面版的 Code 分頁，或終端機。用手機遙控電腦上的對話時，外掛照樣在跑、照樣分享，只是手機上看不到面板；要停請打 <code class="in">/friends pause</code>。</p>
-  <p class="note en">You'll only see it on a computer: the Code tab in the Claude desktop app, or the terminal. If you drive a computer conversation from your phone, the plugin still runs and still shares; you just can't see the panel. To stop, type <code class="in">/friends pause</code>.</p>
-</div>
-
-<section id="shared"><div class="wrap">
-  <h2><span class="zh">它會傳什麼出去</span><span class="en">What it sends</span></h2>
-  <p class="zh">朋友看得到的只有下面三樣。你打的字和 Claude 的回答不會送到中繼伺服器（幫大家轉送狀態的伺服器）。</p>
-  <p class="en">Friends only ever see these three things. Your messages and Claude's replies never go to the relay server (the server that passes statuses between you).</p>
-  <div class="split">
-    <div class="card yes">
-      <h3><span class="zh">會傳</span><span class="en">Sent</span></h3>
-      <ul class="zh"><li>你自己取的名字（最多 20 字，用暱稱就好）</li><li>在不在線：工作中、閒置、離線</li><li>一個分類，例如「修錯誤 · 網站」</li></ul>
-      <ul class="en"><li>The name you pick (up to 20 characters; a nickname is fine)</li><li>Whether you're online: working, idle or offline</li><li>One category, like "Fixing bugs · a website"</li></ul>
-    </div>
-    <div class="card no">
-      <h3><span class="zh">不會傳</span><span class="en">Never sent</span></h3>
-      <ul class="zh"><li>你打的字、Claude 的回答</li><li>檔案內容、程式碼</li><li>資料夾路徑、專案名稱</li></ul>
-      <ul class="en"><li>Your messages or Claude's replies</li><li>File contents or code</li><li>Folder paths or project names</li></ul>
-    </div>
-  </div>
-  <p class="zh">伺服器另外會收到登入用的金鑰、加入時的邀請碼，以及你的 IP（跟你連任何網站一樣）。</p>
-  <p class="en">The server also receives your sign-in key, the invite when you join, and your IP address (as any website does).</p>
-  <p class="zh">朋友也看得到你「幾分鐘前開始」做這件事，所以大概知道你什麼時候在用 Claude。</p>
-  <p class="en">Friends also see how long ago you started, so they can roughly tell when you're using Claude.</p>
-  <p class="zh">分類是從一張固定的清單裡挑的，13 種動作配 12 種對象。伺服器只收清單上的代碼，所以就算外掛有 bug，也送不出你打的一句話。</p>
-  <p class="en">The category comes from a fixed list of 13 actions and 12 subjects. The server only accepts codes from that list, so even a bug in the plugin can't send out a sentence you typed.</p>
-  <details>
-    <summary><span class="zh">看整張清單</span><span class="en">See the full list</span></summary>
-    <div class="tags" id="actions"></div>
-    <div class="tags" id="subjects"></div>
-  </details>
-  <p class="zh gap">加入之後，你開的每一個 Code 對話都會分享，開新對話時面板也會自己打開。把面板關掉不會停止分享，只是改成每分鐘送一次；想停就用下面的 <a href="#stop">暫停</a>。</p>
-  <p class="en gap">Once you join, every Code conversation you open shares, and the panel opens by itself in new ones. Closing the panel doesn't stop sharing; it just sends once a minute instead. To stop, use <a href="#stop">pause</a> below.</p>
-</div></section>
-
-<section id="security"><div class="wrap">
-  <h2><span class="zh">安全嗎</span><span class="en">Is it safe?</span></h2>
-  <div class="card yes lead">
-    <p class="zh"><b>你跟 Claude 的對話和你在做的東西（程式碼、檔案、專案內容），中繼的管理者和朋友都看不到。</b>外掛送出去的只有名字、在不在線、一個分類。挑分類時，外掛會把你打的字遮掉敏感部分，交給你本來就在用的 Claude 判斷，判斷完只留下分類代碼；那段文字跟你平常用 Claude 一樣只到 Anthropic，不會送到中繼伺服器或任何其他地方。</p>
-    <p class="en"><b>Your conversations with Claude and what you're working on (code, files, project details) can't be seen by the relay's operator or your friends.</b> It only sends your name, whether you're online, and one category. To pick the category, it masks sensitive bits of what you typed and asks the same Claude you already use. Only the category code is kept. That text goes to Anthropic like any normal Claude message, and never to the relay server or anywhere else.</p>
-  </div>
-  <p class="zh">怎麼做到的，以及其他防護：</p>
-  <p class="en">How that's enforced, plus other safeguards:</p>
-  <ul class="plain zh">
-    <li>伺服器只收清單上的分類代碼，清單外的值、多出來的欄位都會被拒收。名字也會先清掉控制字元和會把文字方向反過來的字元。</li>
-    <li>分類是你自己的 Claude 用小模型判斷的，最多每 3 分鐘一次，只看你打的字，不看 Claude 的回答和檔案，會用到一點點你的額度。送去判斷之前，網址、路徑、檔名、email、看起來像金鑰、或寫成「密碼：…」的字串會先換成 [path]、[secret] 這種代號。</li>
-    <li>朋友的名字只會顯示在面板上，不會進到你的對話，所以就算有人把名字取成一句指令，也碰不到你的 Claude。</li>
-    <li>加入時你的電腦會拿到一把鑰匙，伺服器只存它的 SHA-256 雜湊，就算資料庫外流也沒人能冒充你。邀請碼是 128 位元的亂數，猜不到。</li>
-    <li>伺服器有大概的流量限制：同一個 IP 每分鐘大約 600 次、加入每小時大約 10 次，每次請求最多 4 KB，一個群組最多 10 人。官方中繼一律走 HTTPS 加密；邀請網址開頭不是 https:// 的不要加入。</li>
-    <li>只加入你認得、信任的人給的邀請。中繼可以是任何人架的，加入就是連上對方的伺服器。</li>
-    <li>分類 24 小時後從資料庫刪掉。你退出群組，伺服器就刪掉你那筆；群組沒人了，整組刪掉。</li>
-    <li>這一頁不載入任何外部字型、腳本或追蹤工具，瀏覽器的安全設定（CSP）也只允許這個網址自己的檔案。</li>
-  </ul>
-  <ul class="plain en">
-    <li>The server only accepts category codes from the list. Anything off the list, or any extra field, is rejected. Names are cleaned of control characters and characters that flip text direction.</li>
-    <li>Your own Claude picks the category with a small model, at most every 3 minutes. It only looks at what you type, never Claude's replies or your files, and it uses a little of your quota. Before that, URLs, paths, file names, emails and anything that looks like a key or is written as "password: …" get swapped for placeholders like [path] and [secret].</li>
-    <li>Friends' names only show up in the panel, never in your conversation, so even a name written as an instruction can't reach your Claude.</li>
-    <li>When you join, your computer gets a key and the server stores only its SHA-256 hash. Even if the database leaked, nobody could log in as you. Invites are 128-bit random codes, so they can't be guessed.</li>
-    <li>The server has rough rate limits: about 600 requests a minute per IP and about 10 join attempts an hour. Requests are capped at 4 KB and a group at 10 people. The official relay always uses HTTPS; don't join an invite whose address doesn't start with https://.</li>
-    <li>Only join invites from people you know and trust. Anyone can run a relay, and joining connects you to their server.</li>
-    <li>Categories are deleted from the database after 24 hours. When you leave, your record is deleted, and an empty group is deleted entirely.</li>
-    <li>This page loads no outside fonts, scripts or trackers, and its Content Security Policy only allows files from this address.</li>
-  </ul>
-  <div class="limits">
-    <h3><span class="zh">用之前要知道的限制</span><span class="en">Limits to know before you join</span></h3>
-    <ul class="zh">
-      <li>官方中繼（就是這頁的網址）由這個專案的開發者管理；群組如果用的是別人自己架的中繼，管理的就是那個人。</li>
-      <li>管理者看得到群組裡每個人的名字、在不在線、分類、時間和 IP；對話內容看不到，因為沒傳上來。</li>
-      <li>伺服器和外掛的程式隨時可能更新。外掛的自動更新預設是關的：加入群組時會問你一次要不要開，不開的話要你自己按更新才會換新版；開了的話，新版會在背景自己裝上、不再問你。不管哪種，每次更新都等於再相信一次管理者當時放上去的版本（原始碼和每一版的紀錄在 GitHub，見 SECURITY.md）。</li>
-      <li>邀請那一行請不要轉傳。拿到的人都能加入，外掛裡也還沒有踢人的按鈕；建立者可以打 <code class="in">/friends rotate</code> 換邀請碼，但只擋得住之後的人。</li>
-      <li>還沒請專業的人做資安檢查，所以現在只找熟的朋友試用。</li>
-      <li>「刪掉」是從資料庫刪除；Cloudflare 的時間回溯功能在 30 天內還能還原。</li>
-    </ul>
-    <ul class="en">
-      <li>The official relay (this page's address) is run by the project's developer. If your group uses a relay someone set up themselves, that person runs it.</li>
-      <li>The operator can see each member's name, online status, category, timing and IP address. Not your conversations, because they're never sent.</li>
-      <li>The server and the plugin can be updated at any time. Auto-update is off by default: when you join a group the plugin asks once whether to turn it on. If you don't, yours only changes when you press Update; if you do, new versions install in the background without asking. Either way, each update means trusting what the operator has published at that moment (the source and every version are on GitHub, see SECURITY.md).</li>
-      <li>Please don't forward the invite line. Anyone who has it can join, and the plugin has no kick button yet. The creator can type <code class="in">/friends rotate</code> for a new invite, but that only stops people who haven't joined.</li>
-      <li>No professional security review yet. That's why it's only being tried with close friends for now.</li>
-      <li>"Deleted" means removed from the database. Cloudflare's point-in-time recovery can still restore it for 30 days.</li>
-    </ul>
-  </div>
-</div></section>
-
-<section id="install"><div class="wrap">
-  <h2><span class="zh">怎麼裝</span><span class="en">How to install</span></h2>
-  <p class="zh">要用電腦上的 Claude Code（Claude 桌面版的 Code 分頁，或在終端機開 claude）；只用 Chat（claude.ai 網頁、Chat 分頁、手機 App）的話目前裝不了，請等網頁版。需要 Claude Code 2.1.295 以上。桌面版更新到最新就好；不確定的話，在對話框打 <code class="in">/status</code> 看版本。朋友傳給你的邀請訊息裡已經有下面這些步驟，照著做就好。</p>
-  <p class="en">You need Claude Code on a computer (the Code tab of the Claude desktop app, or claude in a terminal). If you only use Chat (claude.ai, the Chat tab, or the phone app), it can't be installed yet; please wait for the web version. You need Claude Code 2.1.295 or newer. Updating the desktop app is enough. Not sure? Type <code class="in">/status</code> in the chat box to see the version. The invite your friend sent already has these steps.</p>
-  <ol class="steps">
-    <li><div>
-      <h3><span class="zh">把這段話傳給 Claude</span><span class="en">Send this to Claude</span></h3>
-      <p class="muted zh">在 Claude 桌面版的 Code 分頁（或終端機）開一個對話，<b>只貼這一段</b>送出，不要把朋友傳來的整則訊息貼給 Claude（裡面有邀請碼）。Claude 通常會先問你允不允許；不管有沒有問，都請確認它跑的就是這兩個指令，而且網址是 <code class="in">https://friends-status-relay.friends-status-relay.workers.dev/marketplace.json</code>，對不上就不要裝。外掛會用你電腦的權限執行，所有 Claude 外掛都是這樣。</p>
-      <p class="muted en">Open a conversation in the Code tab of the Claude desktop app (or the terminal) and send <b>just this paragraph</b>, not your friend's whole message (it contains the invite). Claude usually asks before running a command; either way, check it runs exactly these two commands and that the address is <code class="in">https://friends-status-relay.friends-status-relay.workers.dev/marketplace.json</code>. If it doesn't match, don't install. Like every Claude plugin, it runs with your computer's permissions.</p>
-      <div class="say"><p id="c1" class="zh">請幫我安裝一個 Claude Code 外掛，依序執行這兩個指令：claude plugin marketplace add https://friends-status-relay.friends-status-relay.workers.dev/marketplace.json 然後 claude plugin install with-friends@with-friends。找不到 claude 指令的話，用環境變數 CLAUDE_CODE_EXECPATH 裡的執行檔（Claude 桌面版內附的 Claude Code）。裝好跟我說。</p><p id="c1en" class="en">Please install a Claude Code plugin for me by running these two commands: claude plugin marketplace add https://friends-status-relay.friends-status-relay.workers.dev/marketplace.json and then claude plugin install with-friends@with-friends. If the claude command isn't found, use the executable in the CLAUDE_CODE_EXECPATH environment variable (the Claude Code that comes with the Claude desktop app). Tell me when it's done.</p><button type="button" data-copy="c1" data-copy-en="c1en"><span class="zh">複製</span><span class="en">Copy</span></button></div>
-    </div></li>
-    <li><div>
-      <h3><span class="zh">開一個新對話</span><span class="en">Start a new conversation</span></h3>
-      <p class="muted zh">外掛在對話開始時才會載入，已經開著的對話看不到它。</p>
-      <p class="muted en">Plugins load when a conversation starts, so one that's already open won't have it.</p>
-    </div></li>
-    <li><div>
-      <h3><span class="zh">貼上朋友給你的邀請那一行</span><span class="en">Paste the invite line your friend sent</span></h3>
-      <p class="muted zh">長得像這樣，送出後會問你要叫什麼名字：</p>
-      <p class="muted en">It looks like this. After you send it, you'll be asked what name to show:</p>
-      <div class="cmd"><code>/friends join https://friends-status-relay…#xxxx</code></div>
-      <p class="muted zh">之後想再打開面板，打 <code class="in">/friends</code>。面板預設是英文，按面板上的語言鈕可以換成中文。</p>
-      <p class="muted en">Type <code class="in">/friends</code> to bring the panel back later.</p>
-    </div></li>
-  </ol>
-
-  <div class="alt">
-    <h3><span class="zh">Claude 沒有幫你裝的話</span><span class="en">If Claude doesn't install it</span></h3>
-    <p class="zh">有裝終端機版 Claude 的話，可以自己在終端機跑這兩行，做完一樣接第 2 步：</p>
-    <p class="en">If you have the terminal version of Claude, run these two lines yourself, then carry on from step 2:</p>
-    <div class="cmd"><code id="t1">claude plugin marketplace add https://friends-status-relay.friends-status-relay.workers.dev/marketplace.json</code><button type="button" data-copy="t1"><span class="zh">複製</span><span class="en">Copy</span></button></div>
-    <div class="cmd"><code id="t2">claude plugin install with-friends@with-friends</code><button type="button" data-copy="t2"><span class="zh">複製</span><span class="en">Copy</span></button></div>
-    <p class="muted zh">想先看程式碼的話，<a href="/marketplace.json">安裝清單</a>裡有安裝檔的網址和 SHA-256。SHA-256 只保證下載過程沒出錯，防不了管理者自己換掉檔案。</p>
-    <h3 class="gap"><span class="zh">想自己開一個群組</span><span class="en">Starting your own group</span></h3>
-    <p class="zh">裝好後在新對話依序打 <code class="in">/friends relay https://friends-status-relay.friends-status-relay.workers.dev</code> 和 <code class="in">/friends create 你的名字</code>，再到面板按「複製邀請碼」。</p>
-    <p class="en">After installing, type <code class="in">/friends relay https://friends-status-relay.friends-status-relay.workers.dev</code> then <code class="in">/friends create your-name</code> in a new conversation, and press "Copy invite" in the panel.</p>
-    <p class="muted en">To read the code first, the <a href="/marketplace.json">install list</a> has the package URL and its SHA-256. The hash only proves the download wasn't corrupted; it can't stop the operator from swapping the file.</p>
-  </div>
-</div></section>
-
-<section id="backend"><div class="wrap">
-  <h2><span class="zh">資料放在哪</span><span class="en">Where the data lives</span></h2>
-  <p class="zh">官方中繼用的是 Cloudflare Workers 的免費方案。每個群組是一個 Durable Object，裡面是一個很小的 SQLite 資料庫。除此之外沒有別的伺服器，也沒有裝任何分析或追蹤工具。</p>
-  <p class="en">The official relay runs on Cloudflare Workers' free plan. Each group is one Durable Object holding a tiny SQLite database. There's no other server and no analytics or tracking.</p>
-  <div class="flow" role="img" aria-label="你的電腦和朋友的電腦都連到 Cloudflare Worker，Worker 把群組存在 Durable Object / Your computer and your friends' computers each connect to the Cloudflare Worker, which keeps the group in a Durable Object">
-    <div class="node"><span class="zh">你的電腦</span><span class="en">Your computer</span><small>Claude ＋ <span class="zh">外掛</span><span class="en">plugin</span></small></div>
-    <span class="arrow"><span class="h">⇄ HTTPS</span><span class="v">⇅ HTTPS</span></span>
-    <div class="node core">Cloudflare Worker<small><span class="zh">中繼：檢查、限流；每個群組存在一個 Durable Object</span><span class="en">relay: checks and limits; one Durable Object per group</span></small></div>
-    <span class="arrow"><span class="h">⇄ HTTPS</span><span class="v">⇅ HTTPS</span></span>
-    <div class="node"><span class="zh">朋友的電腦</span><span class="en">Friends' computers</span><small>Claude ＋ <span class="zh">外掛</span><span class="en">plugin</span></small></div>
-  </div>
-  <p class="zh">面板開著時，外掛大約每 20 秒送一次狀態，順便拿回朋友的狀態；面板關著時改成每分鐘一次。在不在線只放在記憶體裡，不寫進資料庫，只有加入、退出、換邀請碼、分類換了這類變動才會寫。</p>
-  <p class="en">With the panel open, the plugin sends your status about every 20 seconds and gets your friends' back in the same request. With it closed, once a minute. Online status stays in memory and never hits the database; only changes like joining, leaving, a new invite or a new category get written.</p>
-</div></section>
-
-<section id="stop"><div class="wrap">
-  <h2><span class="zh">不想被看到的時候</span><span class="en">When you'd rather not be seen</span></h2>
-  <div class="cmd"><code id="s1">/friends pause</code><button type="button" data-copy="s1"><span class="zh">複製</span><span class="en">Copy</span></button></div>
-  <p class="muted zh">暫停分享，朋友只看得到你工作中、閒置或離線，看不到分類。對你所有對話都有效，一直到你打 <code class="in">/friends resume</code> 恢復；面板上的「暫停分享」按鈕是同一件事。</p>
-  <p class="muted en">Pauses sharing: friends only see working, idle or offline, with no category. It applies to all your conversations until you type <code class="in">/friends resume</code>. The panel's "Pause sharing" button does the same.</p>
-  <div class="cmd"><code id="s2">/friends hide</code><button type="button" data-copy="s2"><span class="zh">複製</span><span class="en">Copy</span></button></div>
-  <p class="muted zh">在現在這個資料夾裡做的事，朋友只會看到「在忙」，不會有分類。</p>
-  <p class="muted en">For work in the current folder, friends only see "Working", with no category.</p>
-  <div class="cmd"><code id="s3">/friends leave</code><button type="button" data-copy="s3"><span class="zh">複製</span><span class="en">Copy</span></button></div>
-  <p class="muted zh">退出群組，伺服器上你的資料會被刪掉。要整個移除外掛，<b>先退出</b>，再請 Claude 幫你跑 <code class="in">claude plugin uninstall with-friends@with-friends</code> 和 <code class="in">claude plugin marketplace remove with-friends</code>；沒退出就移除的話，你的名字會一直留在伺服器上。</p>
-  <p class="muted en">Leaves the group and deletes your data on the server. To remove the plugin, <b>leave first</b>, then ask Claude to run <code class="in">claude plugin uninstall with-friends@with-friends</code> and <code class="in">claude plugin marketplace remove with-friends</code>. If you uninstall without leaving, your name stays on the server.</p>
-  <p class="muted zh">有新版的時候，請 Claude 依序跑 <code class="in">claude plugin marketplace update with-friends</code> 和 <code class="in">claude plugin update with-friends@with-friends</code>，再開新對話。</p>
-  <p class="muted en">When there's a new version, ask Claude to run <code class="in">claude plugin marketplace update with-friends</code>, then <code class="in">claude plugin update with-friends@with-friends</code>, and start a new conversation.</p>
-</div></section>
-
-<footer><div class="wrap">
-  <span class="zh">做法參考了 <a href="https://github.com/SaharCarmel/claude-who">SaharCarmel/claude-who</a> 和 <a href="https://github.com/chrisluo5311/squad-chat">chrisluo5311/squad-chat</a>（兩個都是 MIT 授權）。這是第三方外掛，不是 Anthropic 的產品。</span>
-  <span class="en">Ideas borrowed from <a href="https://github.com/SaharCarmel/claude-who">SaharCarmel/claude-who</a> and <a href="https://github.com/chrisluo5311/squad-chat">chrisluo5311/squad-chat</a> (both MIT licensed). A third-party plugin, not an Anthropic product.</span>
-</div></footer>
+</footer>
+<script src="guide.js"></script>
 </body>
 </html>

@@ -1,0 +1,107 @@
+name: Activity category looks wrong
+description: Report that a friend's activity category was shown incorrectly
+title: "[Category]: "
+labels: ["category"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Friends with Claude only shares a category code from a fixed list, not conversation content.
+        Please do not paste API keys, invite codes, or conversation content in any field.
+        Pick from the lists; no free text is needed here.
+  - type: dropdown
+    id: displayed-action
+    attributes:
+      label: "Displayed action（面板顯示的動作）"
+      description: "The action the pane showed."
+      options:
+        - "building-features — Building features"
+        - "fixing-bugs — Fixing bugs"
+        - "refactoring — Refactoring"
+        - "writing-tests — Writing tests"
+        - "researching — Researching"
+        - "learning — Learning"
+        - "writing-docs — Writing"
+        - "designing — Designing"
+        - "planning — Planning"
+        - "analyzing-data — Analyzing data"
+        - "setting-up — Setting up"
+        - "reviewing — Reviewing"
+        - "other — Working"
+    validations:
+      required: true
+  - type: dropdown
+    id: displayed-subject
+    attributes:
+      label: "Displayed subject（面板顯示的對象）"
+      description: "The subject the pane showed."
+      options:
+        - "website — a website"
+        - "app — an app"
+        - "backend — a backend"
+        - "game — a game"
+        - "ai-agent — an AI agent"
+        - "automation — automation"
+        - "data — data"
+        - "document — a document"
+        - "coursework — coursework"
+        - "dev-environment — dev environment"
+        - "creative-media — creative work"
+        - "other — (nothing shown)"
+    validations:
+      required: true
+  - type: dropdown
+    id: expected-action
+    attributes:
+      label: "What the action should have been（應該是哪個動作）"
+      description: "The action that should have been shown."
+      options:
+        - "building-features — Building features"
+        - "fixing-bugs — Fixing bugs"
+        - "refactoring — Refactoring"
+        - "writing-tests — Writing tests"
+        - "researching — Researching"
+        - "learning — Learning"
+        - "writing-docs — Writing"
+        - "designing — Designing"
+        - "planning — Planning"
+        - "analyzing-data — Analyzing data"
+        - "setting-up — Setting up"
+        - "reviewing — Reviewing"
+        - "other — Working"
+        - "not-sure — I'm not sure"
+    validations:
+      required: true
+  - type: dropdown
+    id: expected-subject
+    attributes:
+      label: "What the subject should have been（應該是哪個對象）"
+      description: "The subject that should have been shown."
+      options:
+        - "website — a website"
+        - "app — an app"
+        - "backend — a backend"
+        - "game — a game"
+        - "ai-agent — an AI agent"
+        - "automation — automation"
+        - "data — data"
+        - "document — a document"
+        - "coursework — coursework"
+        - "dev-environment — dev environment"
+        - "creative-media — creative work"
+        - "other — (nothing shown)"
+        - "not-sure — I'm not sure"
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often
+      description: "How often does this misclassification happen?"
+      options:
+        - Once
+        - Sometimes
+        - Often
+        - Every time
+    validations:
+      required: true

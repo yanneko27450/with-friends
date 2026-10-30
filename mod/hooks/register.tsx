@@ -8,13 +8,14 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Friend, GroupView, Me, Membership, Net, StatusBody, UpdateView, WhatsNewView } from '../types'
 import { cellWidth, CHANGELOG, changelogRows, PICKER_CHROME } from './changelog'
 import type { ChangelogSection } from './changelog'
-import { AVATAR_EMOJI, avatarSvg } from './avatar'
+import { AVATAR_EMOJI, avatarSvg, fillIndexFor } from './avatar'
+import { isDemoBot, withDemoBot } from './demo-bot'
 import { t } from './i18n'
 import type { Strings } from './i18n'
 import { redact } from './redact'
 import { ACTION_LABEL, ACTIONS, activityText, AVATARS, isAction, isAvatar, isSubject, LANGS, SUBJECT_LABEL, SUBJECTS } from './taxonomy'
 import type { Action, Avatar, Lang, Subject } from './taxonomy'
-import { cleanName } from './text'
+import { cleanName, isValidNameInput } from './text'
 import { fromB64url, isResponsePublicKey, newResponseNonce, OFFICIAL_RESPONSE_KEYS, verifyRelaySignature } from './response-signing'
 
 const PANE = 'friends'
@@ -37,6 +38,8 @@ const group = atom({ plugin: 'with-friends', key: 'group' } as const, null as Gr
 const lang = atom({ plugin: 'with-friends', key: 'lang' } as const, 'en' as Lang)
 const upd = atom({ plugin: 'with-friends', key: 'update' } as const, { latest: '', state: 'idle' } as UpdateView)
 const whatsNew = atom({ plugin: 'with-friends', key: 'whatsNew' } as const, { isOpen: false } as WhatsNewView)
+const removed = atom({ plugin: 'with-friends', key: 'removed' } as const, false)
+const demoHiddenView = atom({ plugin: 'with-friends', key: 'demoHidden' } as const, false)
 /** ui-28：版本紀錄小框框開著多久自動收起（毫秒） */
 export const WHATS_NEW_MS = 10_000
 
@@ -202,7 +205,7 @@ export function isValidRelayResponse(path: string, data: any, auth?: Membership)
   if (path === '/status' || path === '/friends') {
     if (!auth || !Array.isArray(data.members)) return false
     const mine = data.members.filter((v: unknown) => typeof v === 'object' && v !== null && (v as any).id === auth.memberId)
-    if (mine.length !== 1 || (mine[0] as any).isMe !== true) return false
+    if (mine.length !== 1 || (mine[0] as any).isMe !== true || typeof (mine[0] as any).isOwner !== 'boolean') return false
     return data.members.every((v: unknown) => {
       if (typeof v !== 'object' || v === null) return false
       const row = v as any
@@ -213,6 +216,7 @@ export function isValidRelayResponse(path: string, data: any, auth?: Membership)
   }
   if (path === '/invite/rotate') return isToken(data.invite) && Number.isSafeInteger(data.inviteGeneration) && data.inviteGeneration >= 1
   if (path === '/kick') return data.ok === true && isToken(data.invite) && Number.isSafeInteger(data.inviteGeneration) && data.inviteGeneration >= 1
+  if (path === '/name') return data.ok === true
   if (path === '/leave') return data.ok === true
   // 新增 relayCall 端點時必須先在這裡定義成功契約；未知端點不可默認採用。
   return false
@@ -254,6 +258,8 @@ async function relayCall($: EngineInterface, relay: string, method: 'GET' | 'POS
   if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new RelayError(-1)
   // 契約不符是「中繼回的東西格式不對」，不是網路連不上；沿用既有 -1 固定訊息。
   if (!isValidRelayResponse(path, data, auth)) throw new RelayError(-1)
+  // 群主離開後，中繼會指定接任者。只採用已簽章且 self row 唯一的 roster，並用 membership revision 柵欄寫回。
+  if (auth && (path === '/status' || path === '/friends')) await syncOwnerFromRoster($, auth, (data as any).members)
   return data
 }
 
@@ -564,11 +570,15 @@ export function activityOf(cur: Me): { action: Action; subject: Subject } | null
  * 動態只在這個對話有新的時候送一次，其餘只送心跳（中繼收到沒帶代碼＝保留舊動態）；
  * 暫停要明確送 paused，中繼才清掉動態。
  */
-export function statusBody(cur: Me, connId: string, sent: string): StatusBody {
-  if (cur.isPaused) return { state: cur.state, conn: connId, paused: true }
+export function statusBody(cur: Me, connId: string, sent: string, isResume = false): StatusBody {
+  // 0.5.6：暫停時不讓好友看出工作中／閒置（承諾是只看得到在線）——working 一律送 idle；中繼也會再擋一次
+  if (cur.isPaused) return { state: cur.state === 'working' ? 'idle' : cur.state, conn: connId, paused: true }
+  // 0.5.6：中繼的暫停是「這位成員」的旗標，只有明確的 paused: false 才解除。繼續之後要送一次（送成功才停），
+  // 平常的心跳不帶 paused，免得還沒讀到暫停的舊對話把別的對話的暫停蓋掉
+  const resume = isResume ? { paused: false as const } : {}
   const a = activityOf(cur)
-  if (a && JSON.stringify(a) !== sent) return { state: cur.state, conn: connId, ...a }
-  return { state: cur.state, conn: connId }
+  if (a && JSON.stringify(a) !== sent) return { state: cur.state, conn: connId, ...a, ...resume }
+  return { state: cur.state, conn: connId, ...resume }
 }
 
 /** 暫停狀態存在 $.store、所有對話共用；暫停時連這個對話記著的動態一起清掉 */
@@ -577,6 +587,12 @@ function withPaused(v: Me, isPaused: boolean): Me {
 }
 
 /** pane 現在畫的是哪一份成員資料（L-17：tick 拿它跟共用的 store 比，不一樣就重畫） */
+/**
+ * 這個對話自己的記號：它送過 paused: true、或自己按過繼續，而 paused: false 還沒拿到 200。共用 store 的 token 負責「按繼續的對話已經關掉」，
+ * 這個負責「先送出的 paused: true 比 paused: false 晚到中繼、token 已被別的對話清掉」——每個對話的請求是一個接一個送的（isBusy），
+ * 所以送過 paused: true 的對話，最後送到中繼的一定是它自己的 paused: false
+ */
+let needsResume = false
 let shownMember = ''
 /** 跟 shownMember 同一份（L-17 審查：只換了邀請碼時不用清好友列表，要知道上一份是誰） */
 let shownMembership: Membership | undefined
@@ -642,7 +658,14 @@ export async function tick($: EngineInterface, force = false) {
       sentActivity = ''
       cur = await read($, me)
     }
-    const body = statusBody(cur, conn, sentActivity)
+    // 「還沒把 paused: false 送到中繼」存在共用的 $.store：按繼續的那個對話就算先結束，別的對話（包括之後新開的）也會補送
+    // 記號是每次按「繼續」新產生的 token（不是 true）：送出期間又經過「暫停→繼續」時，舊的回應只清得掉自己那一個 token
+    const storedToken = await $.store.get('resumePending')
+    const resumeToken = !cur.isPaused && typeof storedToken === 'string' && storedToken !== '' ? storedToken : ''
+    const isResumePending = !cur.isPaused && (resumeToken !== '' || needsResume)
+    const body = statusBody(cur, conn, sentActivity, isResumePending)
+    // 要在送出「之前」就記：逾時、5xx、回應丟失的 paused: true 照樣可能已經到了中繼（而且可能比別的對話的 paused: false 晚到）
+    if (body.paused === true) needsResume = true
     if (!isVersionSent) {
       shownVersion ??= await ownVersion($)
       if (shownVersion) body.version = shownVersion
@@ -691,15 +714,22 @@ export async function tick($: EngineInterface, force = false) {
       }
     }
     // L-17：等中繼的期間別的對話離開或換了群組：這次的回應是舊群組的，不記任何狀態、不寫好友列表（下一輪會照新的成員資料重畫）
-    if (!isSameMember(await getMembership($), m)) return
+    const currentMembership = await getMembership($)
+    if (!isSameMember(currentMembership, m)) return
     if (body.action) sentActivity = JSON.stringify({ action: body.action, subject: body.subject })
     if (body.version) isVersionSent = true
+    if (body.paused === false) needsResume = false
+    if (body.paused === false && resumeToken !== '' && (await $.store.get('resumePending')) === resumeToken) await $.store.delete('resumePending')
     // 送出去的期間又換了頭像（setAvatar 把旗子放下、但那次 tick 因為 isBusy 沒跑）：store 跟送出的不一樣就下一輪再送
     if (out.avatar && !isAvatarRejected) isAvatarSent = (await $.store.get('avatar')) === out.avatar
     lastPushed = signature
     lastPushAt = now
     relayMinVersion = typeof data.minVersion === 'string' && SEMVER_RE.test(data.minVersion) ? data.minVersion : ''
-    if (Array.isArray(data.members)) await update($, friends, () => friendsFrom(data.members))
+    if (Array.isArray(data.members)) {
+      // 延遲的舊 /status 可能帶改名前的 self row；自己的名字以 revision-safe 本機 membership 為準，不能把 pane 暫時畫回舊名。
+      const rows = friendsFrom(data.members).map(f => f.isMe ? { ...f, name: cleanName(currentMembership.name, 20) || '?' } : f)
+      await update($, friends, () => rows)
+    }
     await update($, net, () => ({ isOk: true, error: '', at: now }))
     invalidResponseFailures = 0
     invalidResponseRetryAt = -Infinity
@@ -707,6 +737,14 @@ export async function tick($: EngineInterface, force = false) {
     // L-17 審查：等中繼的期間別的對話離開或換了群組，這個錯誤（例如 401）是舊群組的，不顯示；下一輪照新的成員資料重來
     if (m && !isSameMember(await getMembership($), m)) return
     const s = t(await read($, lang))
+    // 被移除（或群組已刪）後，這份 membership 已不可再用。只看 401，不採用中繼文字。
+    if (m && err instanceof RelayError && err.status === 401) {
+      await $.store.set('removedNotice', true)
+      await update($, removed, () => true)
+      await forgetGroup($, m)
+      await update($, net, () => ({ isOk: true, error: '', at: now }))
+      return
+    }
     // ui-4：連不上（網路）→ 說會自動重試（每 10 秒的 tick 本來就會重試）；其他錯誤照狀態碼挑固定句子
     const error = err instanceof RelayError && err.status === 0 ? s.unreachable : errorText(err, s)
     if (err instanceof RelayError && err.status === -1) {
@@ -816,7 +854,7 @@ function armWhatsNewTimer($: EngineInterface, gen: number) {
  * 所以新加子指令要加在這裡（不加的話 case 寫不進去、tsc 會擋；加了沒寫 case 也會擋）。
  * 會打中繼的子指令，測試的 ALL_SUBCOMMANDS 裡要有一筆能真的走到中繼的參數（只放用法錯誤的寫法測不到）
  */
-export const SUBCOMMANDS = ['', 'open', 'help', 'create', 'join', 'pause', 'resume', 'hide', 'unhide', 'hidden', 'relay', 'lang', 'update', 'status', 'avatar', 'autoupdate', 'rotate', 'leave'] as const
+export const SUBCOMMANDS = ['', 'open', 'help', 'create', 'join', 'pause', 'resume', 'hide', 'unhide', 'hidden', 'demo', 'relay', 'lang', 'update', 'status', 'avatar', 'autoupdate', 'rotate', 'remove', 'name', 'leave'] as const
 export type Subcommand = (typeof SUBCOMMANDS)[number]
 /** 版本紀錄可以挑的版本：版本號 ≤ 自己的，新的在前（ui-28 只列這些；ui-29 一次顯示其中一個） */
 export function whatsNewVersions(ver: string | undefined): string[] {
@@ -857,12 +895,21 @@ async function setLang($: EngineInterface, l: Lang) {
 async function retitle($: EngineInterface, l: Lang) {
   if (isPaneOpen) await $.ui.open({ id: PANE, title: t(l).title })
 }
+// R6-02：藏起來與否存在同一人所有對話共用的 $.store.demoHidden（畫面每次都從 store 讀）；atom 只用來叫開著的 pane 重畫
+async function setDemoHidden($: EngineInterface, isHidden: boolean) {
+  await $.store.set('demoHidden', isHidden)
+  await update($, demoHiddenView, () => isHidden)
+}
 const nextLang = (l: Lang): Lang => LANGS[(LANGS.indexOf(l) + 1) % LANGS.length] ?? 'en'
 
 async function setPaused($: EngineInterface, isPaused: boolean) {
+  if (!isPaused) needsResume = true // 先記在這個對話，後面的 store 寫入失敗也不會漏送
   await $.store.set('paused', isPaused)
   await update($, me, v => withPaused(v, isPaused))
   if (isPaused) sentActivity = ''
+  // 繼續：記下「中繼那邊的暫停旗標還沒解」，任一對話送 paused: false 拿到 200 才清；再暫停就作廢
+  if (isPaused) await $.store.delete('resumePending')
+  else await $.store.set('resumePending', crypto.randomUUID())
 }
 
 /**
@@ -895,8 +942,8 @@ async function inviteText($: EngineInterface, l: Lang, relay: string, invite: st
   try {
     const answer = await $.ui.ask(s.askInstalled, { header: s.askInstalledHeader, options: [s.installedYes, s.installedNo, s.installedNoOther] })
     if (answer === s.installedYes) return { text: joinLine(link), toast: s.copied }
-    if (answer === s.installedNo) return { text: s.inviteMessage(joinLine(link)), toast: s.copiedWithSteps }
-    if (answer === s.installedNoOther) return { text: t(nextLang(l)).inviteMessage(joinLine(link)), toast: s.copiedWithSteps }
+    if (answer === s.installedNo) return { text: s.installMessage, toast: s.copiedInstallOnly }
+    if (answer === s.installedNoOther) return { text: t(nextLang(l)).installMessage, toast: s.copiedInstallOnly }
     return null
   } catch {
     return null
@@ -965,6 +1012,160 @@ async function confirmLeave($: EngineInterface, s: Strings, isOwner: boolean): P
 }
 
 /**
+ * 移除確認不放好友名字（名字是別人打的字，問答框可能進對話；ui-16 原設計）。以前改放 roster 序號，但序號是中繼回來的順序、
+ * pane 畫面另外排序，兩者對不上，又允許同名，群主可能確認到另一位（盲審 #4）。
+ * 取捨：改放「固定字彙」的描述——頭像代碼（清單內 16 個）、在線狀態、多久前在線——這些畫面上看得到、也都不是自由文字；
+ * 有同名的人就另外註明「另有 N 位同名」。真正決定移除誰的仍是 memberId（按鈕所在那一列／指令唯一符合的那位），描述只幫人核對。
+ */
+export function removeWho(f: Friend, roster: Friend[], l: Lang, onTerminal = false): string {
+  const s = t(l)
+  const join = (parts: string[]) => parts.join(l === 'zh-TW' ? '，' : ', ')
+  // 全部是固定字彙：頭像代碼（沒選頭像的人，pane 畫底色圓框，就說底色）、在線狀態或多久前在線
+  const describe = (x: Friend) => {
+    const a = avatarOf(x)
+    const parts: string[] = []
+    if (a) parts.push(`${AVATAR_EMOJI[a]} ${s.avatarName[a]}`)
+    // 終端機的列只畫表情符號、名字和狀態字：沒畫的底色、「多久前在線」就不說，不然核對的資訊畫面上找不到，
+    // 該跳的「看起來一樣」提醒也會被這些畫面上沒有的差異蓋掉
+    else if (!onTerminal && x.presence !== 'offline') parts.push(s.askRemoveBadge(fillIndexFor(x.id)))
+    parts.push(x.presence === 'offline' && !onTerminal ? s.lastSeen(ago(x.seenAgoSec, l)) : s.presence[x.presence])
+    return join(parts)
+  }
+  const mine = describe(f)
+  const twins = roster.filter(x => !x.isMe && x.id !== f.id && x.name === f.name)
+  const parts = [mine]
+  if (twins.length > 0) parts.push(s.askRemoveSameName(twins.length))
+  // 描述還是一模一樣（例如兩位都離線、同一分鐘前在線）：照實說分不出來，請看按的是哪一列
+  if (twins.some(x => describe(x) === mine)) parts.push(s.askRemoveLookAlike)
+  return join(parts)
+}
+
+/** 移除確認只放 removeWho 的固定字彙描述，不把好友名字放進問答框。關掉框也視為取消。 */
+async function confirmRemove($: EngineInterface, s: Strings, who: string): Promise<boolean> {
+  try {
+    return (await $.ui.ask(s.askRemove(who), { header: s.askRemoveHeader, options: [s.removeYes, s.removeNo] })) === s.removeYes
+  } catch {
+    return false
+  }
+}
+
+async function askNewName($: EngineInterface, s: Strings): Promise<{ name?: string; invalid?: true }> {
+  try {
+    const answer = await $.ui.ask(s.askNewName, { header: s.askNewNameHeader, options: [s.keepName, s.cancelName] })
+    if (answer === s.keepName || answer === s.cancelName || !answer.trim()) return {}
+    if (!isValidNameInput(answer, 20)) return { invalid: true }
+    return { name: answer.trim() }
+  } catch {
+    return {}
+  }
+}
+
+/** 改名只寫回同一個身分；revision 改變時沿用 membership 寫入的保守補償，避免復活已離開的身分。 */
+async function renameSelf($: EngineInterface, original: Membership, newName: string): Promise<void> {
+  if (!isValidNameInput(newName, 20)) throw new RelayError(-2)
+  await relayCall($, original.relay, 'POST', '/name', { name: newName.trim() }, original)
+  let mem: Membership | undefined
+  await withMembershipWrite(async () => {
+    const revision = membershipRevision()
+    await $.store.set('membershipRevision', revision)
+    const now = await getMembership($)
+    if (!isSameMember(now, original)) return
+    mem = { ...now, name: newName.trim() }
+    await $.store.set('membership', mem)
+    if (await $.store.get('membershipRevision') !== revision) {
+      const after = await getMembership($)
+      if (isSameMember(after, mem) && after?.name === mem.name) await $.store.delete('membership')
+      mem = undefined
+    }
+  })
+  if (!mem) throw new RelayError(-2)
+  await update($, friends, rows => rows.map(f => f.id === original.memberId ? { ...f, name: newName.trim() } : f))
+}
+
+/** 套用 rotate／kick 回來的新邀請；沿用 L-SEC-ROTATE-1 的 revision 與 inviteGeneration 柵欄。 */
+async function saveRotatedInvite($: EngineInterface, original: Membership, r: any): Promise<Membership | undefined> {
+  let mem: Membership | undefined
+  await withMembershipWrite(async () => {
+    const revision = membershipRevision()
+    await $.store.set('membershipRevision', revision)
+    const now = await getMembership($)
+    if (!isSameMember(now, original) || !isToken(r.invite) || !Number.isSafeInteger(r.inviteGeneration)
+      || r.inviteGeneration <= now.inviteGeneration) return
+    mem = { ...now, invite: r.invite, inviteGeneration: r.inviteGeneration }
+    await $.store.set('membership', mem)
+    if (await $.store.get('membershipRevision') !== revision) {
+      const after = await getMembership($)
+      if (isSameMember(after, mem) && after?.inviteGeneration === mem.inviteGeneration) await $.store.delete('membership')
+      mem = undefined
+    }
+  })
+  if (mem) await setGroup($, mem)
+  else await setGroup($, await getMembership($))
+  return mem
+}
+
+/** 已簽章 roster 的 self row 是群主權限真值；只更新同一身分，不能把已離開或已換群的人復活。 */
+async function syncOwnerFromRoster($: EngineInterface, original: Membership, members: unknown[]): Promise<Membership | undefined> {
+  const self = members.find((row: any) => row && row.id === original.memberId && row.isMe === true) as { isOwner: boolean } | undefined
+  if (!self) return undefined // relayCall 的契約會先拒絕；這裡只做防禦
+  let mem: Membership | undefined
+  let changed = false
+  await withMembershipWrite(async () => {
+    const before = await getMembership($)
+    if (!isSameMember(before, original)) return
+    if (before.isOwner === self.isOwner) { mem = before; return }
+    const revision = membershipRevision()
+    await $.store.set('membershipRevision', revision)
+    const now = await getMembership($)
+    if (!isSameMember(now, original)) return
+    if (now.isOwner === self.isOwner) { mem = now; return }
+    mem = { ...now, isOwner: self.isOwner }
+    await $.store.set('membership', mem)
+    changed = true
+    if (await $.store.get('membershipRevision') !== revision) {
+      const after = await getMembership($)
+      if (isSameMember(after, mem) && after?.isOwner === mem.isOwner) await $.store.delete('membership')
+      mem = undefined
+    }
+  })
+  if (mem && changed) await setGroup($, mem)
+  return mem
+}
+
+export type RemoveOutcome = 'ok' | 'relay-failed' | 'uncertain'
+const removeText = (outcome: RemoveOutcome, s: Strings) => outcome === 'ok' ? s.removedOne : outcome === 'relay-failed' ? s.removeFailed : s.removeUncertain
+
+/** 中繼以 memberId 精確移除；成功輸出與 toast 都只用固定句，不帶名字。checkpoint 讓測試釘住成功回應後的 crash 邊界。 */
+export async function removeMember($: EngineInterface, m: Membership, memberId: string, checkpoint: () => Promise<void> = async () => {}): Promise<RemoveOutcome> {
+  let relayAccepted = false
+  try {
+    const r = await relayCall($, m.relay, 'POST', '/kick', { memberId }, m)
+    relayAccepted = true
+    await checkpoint()
+    if (!(await saveRotatedInvite($, m, r))) return 'uncertain'
+    await update($, friends, rows => rows.filter(f => f.id !== memberId))
+    return 'ok'
+  } catch (err) {
+    // 0.5.6：已簽章的 404＝中繼確定這個人不在群組了（例如上一次踢人其實成功、只是回應丟了，這次是重試；或他剛好自己離開了）→
+    // 目的已達成，不再誤報「沒移除」。但「踢人一併換邀請碼」的承諾不能因此落空（他離開時沒換碼、重試時本機也沒拿到上次的新碼），
+    // 所以這裡補換一次邀請碼並存下來；換碼或存檔任何一步失敗都只能說不確定。成功才清掉本機好友列
+    if (!relayAccepted && err instanceof RelayError && err.status === 404) {
+      try {
+        const rotated = await relayCall($, m.relay, 'POST', '/invite/rotate', {}, m)
+        if (!(await saveRotatedInvite($, m, rotated))) return 'uncertain'
+        await update($, friends, rows => rows.filter(f => f.id !== memberId))
+        return 'ok'
+      } catch {
+        return 'uncertain'
+      }
+    }
+    // 只有收到已簽章的明確 HTTP 失敗，才知道 kick 沒有完成；傳輸／簽章／本機 store／成功後例外都只能保守標為不確定。
+    // 盲審 #2：5xx 不算「確定沒做」——Worker／Durable Object 可能已寫入才出錯，所以只有已簽章的 4xx（中繼明確拒絕）算失敗。
+    return !relayAccepted && err instanceof RelayError && err.status >= 400 && err.status <= 499 ? 'relay-failed' : 'uncertain'
+  }
+}
+
+/**
  * 問群組名稱（ui-7：pane 的「建立群組」鈕）。群組名是使用者自己打的字；選預設＝「名字 的群組」（照介面語言，
  * 不用中繼的中文預設）。選「先不建立」、關掉、空白都回 null
  */
@@ -1022,6 +1223,8 @@ async function createGroup($: EngineInterface, relay: string, name: string, grou
     throw err
   }
   await $.store.set('onboarded', true)
+  await $.store.delete('removedNotice')
+  await update($, removed, () => false)
   await setGroup($, mem)
 }
 
@@ -1040,6 +1243,8 @@ async function joinGroup($: EngineInterface, parsed: { relay: string; invite: st
     throw err
   }
   await $.store.set('onboarded', true)
+  await $.store.delete('removedNotice')
+  await update($, removed, () => false)
   await setGroup($, mem)
 }
 
@@ -1047,10 +1252,12 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const l = await storedLang($)
     await update($, lang, () => l)
+    const wasRemoved = (await $.store.get('removedNotice')) === true
+    await update($, removed, () => wasRemoved)
     await $.command.register({
       name: 'friends',
       description: t(l).commandDescription,
-      argumentHint: '[create|join|status|pause|resume|hide|lang|avatar|update|autoupdate|leave|help]',
+      argumentHint: '[create|join|status|pause|resume|hide|lang|avatar|update|autoupdate|rotate|remove|name|leave|help]',
     })
     const m = await getMembership($)
     await setGroup($, m)
@@ -1064,8 +1271,8 @@ export const register: Register = on => {
     if (m) {
       isPaneOpen = true
       void $.ui.open({ id: PANE, title: t(l).title })
-    } else if (!(await $.store.get('onboarded'))) {
-      // 裝好後第一次開對話：自己打開 pane 的「貼上邀請」，只跳這一次（主人 10-11 選「兩種都做」）
+    } else {
+      // 還沒加入群組：每次開新對話都自己打開 pane 的「貼上邀請」（R6-01：原本只跳第一次，按過「之後再說」就再也找不回來）
       await $.store.set('onboarded', true)
       isPaneOpen = true
       void $.ui.open({ id: PANE, title: t(l).title, focus: true })
@@ -1184,6 +1391,13 @@ export const register: Register = on => {
         }
         case 'hidden':
           return { text: s.hiddenList(await hiddenDirs($)) }
+        case 'demo': {
+          // R6-02：隱藏／顯示示範機器人（不用 hide：/friends hide 是「不分享的資料夾」）。只認 on／off，其餘回說明
+          const want = rest[0]
+          if (want !== 'on' && want !== 'off') return { text: s.help }
+          await setDemoHidden($, want === 'off')
+          return { text: want === 'off' ? s.demoOff : s.demoOn }
+        }
         case 'relay': {
           const url = rest[0] ?? ''
           const origin = relayOrigin(url)
@@ -1246,38 +1460,36 @@ export const register: Register = on => {
           if (!m) return { text: s.notJoined }
           const r = await relayCall($, m.relay, 'POST', '/invite/rotate', {}, m)
           if (!isToken(r.invite) || !Number.isSafeInteger(r.inviteGeneration) || r.inviteGeneration < 1) throw new RelayError(-1)
-          // L-14：等中繼的那一下，別的對話可能已經離開或換了群組（成員資料是所有對話共用的）。
-          // 只在 store 裡還是同一個身分時才寫回，不然會把已經離開的群組寫回來。
-          let stale = false
-          let mem: Membership | undefined
-          await withMembershipWrite(async () => {
-            // Publish our intent before the membership read. A concurrent writer that
-            // completes after this point changes the revision and is detected below.
-            const revision = membershipRevision()
-            await $.store.set('membershipRevision', revision)
-            const now = await getMembership($)
-            if (!isSameMember(now, m) || r.inviteGeneration <= now.inviteGeneration) stale = true
-            else {
-              mem = { ...now, invite: r.invite, inviteGeneration: r.inviteGeneration }
-              await $.store.set('membership', mem)
-              // 另一個 hooks 實例／程序可能不共用上面的 mutex；revision 改變代表期間已有 leave／換群。
-              if (await $.store.get('membershipRevision') !== revision) {
-                const after = await getMembership($)
-                if (isSameMember(after, mem) && after?.inviteGeneration === mem.inviteGeneration)
-                  await $.store.delete('membership')
-                mem = undefined
-                stale = true
-              }
-            }
-          })
-          if (stale || !mem) {
+          const mem = await saveRotatedInvite($, m, r)
+          if (!mem) {
             await update($, friends, () => [])
-            await setGroup($, await getMembership($))
             void tick($, true)
             return { text: s.rotateStale }
           }
-          await setGroup($, mem)
           return { text: s.rotated }
+        }
+        case 'remove': {
+          if (!m) return { text: s.notJoined }
+          const raw = rest.join(' ').trim()
+          if (!raw) return { text: s.usageRemove }
+          const data = await relayCall($, m.relay, 'GET', '/friends', undefined, m)
+          const current = await getMembership($)
+          if (!isSameMember(current, m)) return { text: s.removeFailed }
+          if (!current.isOwner) return { text: s.removeOwnerOnly }
+          const roster = friendsFrom(data.members).filter(f => !f.isMe)
+          const matches = roster.filter(f => f.name === raw)
+          if (matches.length === 0) return { text: s.removeNotFound }
+          if (matches.length > 1) return { text: s.removeAmbiguous }
+          const target = matches[0]!
+          if (!(await confirmRemove($, s, removeWho(target, roster, l)))) return { text: s.removeCancelled }
+          return { text: removeText(await removeMember($, current, target.id), s) }
+        }
+        case 'name': {
+          if (!m) return { text: s.notJoined }
+          const want = rest.join(' ')
+          if (!isValidNameInput(want, 20)) return { text: s.usageName }
+          await renameSelf($, m, want)
+          return { text: s.nameChanged }
         }
         case 'leave': {
           if (!m) return { text: s.notJoined }
@@ -1313,7 +1525,10 @@ export const register: Register = on => {
     const n = await read($, net)
     const u = await read($, upd)
     const wn = await read($, whatsNew)
+    const wasRemoved = await read($, removed)
     const isAutoUpdate = (await $.store.get('autoUpdate')) === true
+    await read($, demoHiddenView) // R6-02：訂閱，按「隱藏示範」或打 /friends demo off|on 時 pane 會重畫；實際值每次從 store 讀
+    const isDemoHidden = (await $.store.get('demoHidden')) === true
     // ui-24（主人 10-12「右下角可以多一行字」）：最底下靠右小字顯示自己的版本，朋友看了就知道升級了沒；讀不到就不畫
     // 同一個對話裡版本不會變（更新要開新對話才生效），讀一次就記住
     shownVersion ??= await ownVersion($)
@@ -1466,7 +1681,7 @@ export const register: Register = on => {
             {langButton}
           </Box>
           {updateRow}
-          <Text>{s.notInGroup}</Text>
+          <Text>{wasRemoved ? s.removedFromGroup : s.notInGroup}</Text>
           {/* ui-29h：沒有輸入框的介面（手機）不說「貼在這裡」，改教用指令加入（指令在手機也能打） */}
           <Text>{Input ? s.joinIntro : s.joinIntroNoInput}</Text>
           {Input && (
@@ -1474,6 +1689,7 @@ export const register: Register = on => {
               onSubmit={(value: string) => { void submitInvite(value) }} />
           )}
           <Text dimColor>{s.joinHint}</Text>
+          <Text dimColor wrap="truncate-end">{s.reopenHint}</Text>
           <Box flexDirection="row" gap={1}>
             <Button key="create" label={s.createGroup} onPress={() => { void pressCreate() }} />
             <Button key="later" label={s.later} onPress={() => { isPaneOpen = false; void $.ui.close({ id: PANE }) }} />
@@ -1482,12 +1698,33 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const sorted = [...list].sort((a, b) => ORDER[a.presence] - ORDER[b.presence] || a.name.localeCompare(b.name))
+    // ui-13：示範機器人只在這裡加進要畫的名單（本機、不經中繼）；下面的在線人數、isAlone、移除編號都照真的 list 算
+    // R6-02：示範機器人改成獨立一塊（下面的 demoCard），不混進好友清單與離線清單；已隱藏就不加
+    const drawn = list.length > 0 ? withDemoBot(list, l, Date.now(), isDemoHidden) : list
+    const demoFriend = drawn.find(isDemoBot)
+    const sorted = drawn.filter(f => !isDemoBot(f)).sort((a, b) => ORDER[a.presence] - ORDER[b.presence] || a.name.localeCompare(b.name))
     const online = list.filter(f => f.presence !== 'offline' && !f.isMe).length
     // 好友看到的是中繼上自己那一筆（可能是別的對話送的），不是這個對話自己的分類
     const meOnRelay = list.find(f => f.isMe)
     // ui-4：列表拿到了、但群組裡只有自己 → 教怎麼邀請
     const isAlone = list.length > 0 && !list.some(f => !f.isMe)
+    const removeRoster = list.filter(f => !f.isMe)
+    const demoCard = (key: string, buttonKey: string, isBoxed: boolean) => demoFriend ? (
+      <Box key={key} flexDirection="column" {...(isBoxed ? { borderStyle: 'round', borderColor: 'inactive', borderDimColor: true, paddingX: 1 } : { marginTop: 1 })}>
+        <Text bold wrap="truncate-end">{demoFriend.name}</Text>
+        <Text dimColor wrap="truncate-end">{s.demoLabel}</Text>
+        <Box flexDirection="row"><Button key={buttonKey} label={s.demoHide} onPress={() => { void setDemoHidden($, true) }} /></Box>
+      </Box>
+    ) : null
+    const pressRemove = async (target: Friend, onTerminal = false) => {
+      const l2 = await read($, lang)
+      const s2 = t(l2)
+      const cur = await getMembership($)
+      if (!cur?.isOwner || !removeRoster.some(f => f.id === target.id) || !(await confirmRemove($, s2, removeWho(target, removeRoster, l2, onTerminal)))) return
+      const now = await getMembership($)
+      if (!isSameMember(now, cur) || !now.isOwner) { $.ui.toast(s2.removeFailed); return }
+      $.ui.toast(removeText(await removeMember($, cur, target.id), s2))
+    }
     const pausedHint = mine.isPaused ? <Text dimColor wrap="truncate-end">{s.pausedHint}</Text> : null
     const myLine = mine.isPaused
       ? s.myPaused
@@ -1550,6 +1787,24 @@ export const register: Register = on => {
         <Text dimColor>{s.leave}</Text>
       </Button>
     )
+    const nameButton = (
+      <Button key="name" label={s.changeName} onPress={() => {
+        void (async () => {
+          const s2 = t(await read($, lang))
+          const cur = await getMembership($)
+          if (!cur) return
+          const answer = await askNewName($, s2)
+          if (answer.invalid) { $.ui.toast(s2.nameInvalid); return }
+          if (!answer.name) { $.ui.toast(s2.nameCancelled); return }
+          try {
+            await renameSelf($, cur, answer.name)
+            $.ui.toast(s2.nameChanged)
+          } catch (err) {
+            $.ui.toast(s2.error(errorText(err, s2)))
+          }
+        })()
+      }} />
+    )
     const header = (
       <Box flexDirection="row" justifyContent="space-between" gap={1}>
         <Box flexDirection="row" gap={1} flexShrink={1}>
@@ -1580,7 +1835,8 @@ export const register: Register = on => {
       // 高度不夠時先把離線框收成只剩標題，再把動態收成「還有 N 位」，自己的那一區與按鈕一定留著
       const rows = e.props.scroll ? e.props.scroll.bodyRows : 100
       // 標題 2＋間距 1；「你」標籤 1＋動態 1＋按鈕 1＋間距 1＋離開 1＋間距 1；區塊間距 2
-      const fixedRows = 3 + (n.isOk ? 0 : 1) + (updateRow ? updateRows + 1 : 0) + 6 + (pausedHint ? 1 : 0) + 2 + (versionRow ? versionRows + 1 : 0)
+      // R6-02：示範卡（上下框線 2＋三行）＋框外間距 1
+      const fixedRows = 3 + (n.isOk ? 0 : 1) + (updateRow ? updateRows + 1 : 0) + 6 + (pausedHint ? 1 : 0) + 2 + (versionRow ? versionRows + 1 : 0) + (demoFriend ? 6 : 0)
       // 每位朋友：三行字＋上面空一行
       const CARD_ROWS = 4
       // 離線框：上下框線 2＋標題 1＋框外間距 1，每人 2 行（頭像），多的收成「還有 N 位」1 行
@@ -1619,7 +1875,10 @@ export const register: Register = on => {
                   <Box flexDirection="column" flexGrow={1} flexShrink={1}>
                     <Box flexDirection="row" justifyContent="space-between" gap={1}>
                       <Text bold wrap="truncate-end">{f.name}</Text>
-                      {when !== '' && <Text dimColor>{when}</Text>}
+                      <Box flexDirection="row" gap={1}>
+                        {when !== '' && <Text dimColor>{when}</Text>}
+                        {g.isOwner && !isDemoBot(f) && <Button key={'remove-' + f.id} label={s.removeButton} onPress={() => { void pressRemove(f) }} />}
+                      </Box>
                     </Box>
                     {f.action !== '' ? <Text wrap="truncate-end">{actionLabel(f.action)}</Text> : <Text dimColor>{s.noActivity}</Text>}
                     <Text dimColor wrap="truncate-end">{third}</Text>
@@ -1637,11 +1896,13 @@ export const register: Register = on => {
                   {avatar(f, 24)}
                   <Text dimColor wrap="truncate-end">{f.name}</Text>
                   <Text dimColor wrap="truncate-end">{s.lastSeen(ago(f.seenAgoSec, l)) + (oldTag(f) ? ` · ${oldTag(f)}` : '')}</Text>
+                  {g.isOwner && !isDemoBot(f) && <Button key={'remove-off-' + f.id} label={s.removeButton} onPress={() => { void pressRemove(f) }} />}
                 </Box>
               ))}
               {moreOffline > 0 && <Text dimColor>{shownOffline.length ? s.more(moreOffline) : s.offlineList(offlineFriends.map(f => f.name).join(l === 'zh-TW' ? '、' : ', '))}</Text>}
             </Box>
           )}
+          {demoCard('demo', 'hide-demo-bot', true)}
           <Box flexDirection="column">
             <Text dimColor wrap="truncate-end">{s.youLabel + (meOnRelay ? ` · ${meOnRelay.name}` : '')}</Text>
             <Text bold={!mine.isPaused} color={mine.isPaused ? 'warning' : undefined} wrap="truncate-end">{myLine}</Text>
@@ -1652,6 +1913,7 @@ export const register: Register = on => {
             </Box>
             <Box flexDirection="row" gap={1} marginTop={1}>
               {avatarButton}
+              {nameButton}
               {leaveButton}
             </Box>
           </Box>
@@ -1663,9 +1925,12 @@ export const register: Register = on => {
     // 終端機：沒有 Svg，行內 pane 又矮（實測約 11 行就被截）——控制項放最上面，好友一人一行，放不下就收成「還有 N 位」
     // 自己已由上面的 myLine 單獨佔一列；好友區不能再把 isMe 算進顯示／收起數。
     const terminalFriends = sorted.filter(f => !f.isMe)
-    const headerRows = 4 + (n.isOk ? 0 : 1) + updateRows + (pausedHint ? 1 : 0) + (isAlone ? 2 : 0) // 邀請說明比較長，窄的終端機會折成兩行
+    const headerBase = 5 + (n.isOk ? 0 : 1) + updateRows + (pausedHint ? 1 : 0) + (isAlone ? 2 : 0) // ui-15 改名另佔一列；邀請說明比較長，窄的終端機會折成兩行
     // 版本列只在好友都放得下時才畫：行內 pane 很矮，不拿好友的位置換版本（看版本也可以打 /friends update）
     const bodyRows = e.props.scroll ? e.props.scroll.bodyRows : Infinity
+    // R6-02：示範塊（3 行＋上面空一行）排在真好友之後、版本列之前；好友都放得下、還有 4 行才畫，不拿真好友的位置換（不畫就是整塊不畫，不會剩一個沒標示的機器人）
+    const isTermDemo = !!demoFriend && bodyRows - headerBase - terminalFriends.length >= 4
+    const headerRows = headerBase + (isTermDemo ? 4 : 0)
     // ui-28：版本列＋按鈕（2 行）也是放得下才畫；框框再看剩幾行（ui-29 起框裡只有挑的那一個版本）
     const termRoom = bodyRows - headerRows - terminalFriends.length
     // ui-29：框裡本來就只有一個版本，放得下（含挑版本那一列）就畫，放不下就不畫框
@@ -1691,6 +1956,7 @@ export const register: Register = on => {
           {/* ui-26：終端機按鈕列只留 4 個（5 個在英文約 79 欄會擠爆），換頭像用 /friends avatar；好友的頭像照樣畫在名字前（表情符號） */}
           {leaveButton}
         </Box>
+        <Box flexDirection="row" gap={1}>{nameButton}</Box>
         <Box flexDirection="column" marginTop={1}>
           {sorted.length === 0 && <Text dimColor>{s.loading}</Text>}
           {isAlone && <Text dimColor>{s.alone}</Text>}
@@ -1708,9 +1974,11 @@ export const register: Register = on => {
                 <Text dimColor>{ago(f.activityAgoSec, l)}</Text>
               )}
               {oldTag(f) !== '' && <Text dimColor>· {oldTag(f)}</Text>}
+              {g.isOwner && !isDemoBot(f) && <Button key={'remove-term-' + f.id} label={s.removeButton} onPress={() => { void pressRemove(f, true) }} />}
             </Box>
           ))}
           {hiddenCount > 0 && <Text dimColor>{s.more(hiddenCount)}</Text>}
+          {isTermDemo && demoCard('demo-term', 'hide-demo-term', false)}
         </Box>
         {termVersionBlock}
       </Box>

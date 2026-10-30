@@ -53,10 +53,12 @@ if (!BASE) {
 console.log(`測試對象：${BASE}`)
 
 const auth = m => `Bearer ${m.groupId}.${m.memberId}.${m.memberKey}`
-async function call(method, path, body, m, rawBody, ip) {
+async function call(method, path, body, m, rawBody, ip, version = '0.5.6') {
   const nonce = randomBytes(18).toString('base64url')
   const headers = { 'content-type': 'application/json', 'x-friends-nonce': nonce, 'x-friends-origin': BASE }
   if (ip) headers['x-test-ip'] = ip
+  if (ip) headers['cf-connecting-ip'] = ip
+  if (version) headers['x-friends-version'] = version // 0.5.6：預設像新版外掛；傳 '' 模擬舊版／沒帶版本
   if (m) headers.authorization = typeof m === 'string' ? m : auth(m)
   const res = await fetch(BASE + path, {
     method, headers, body: rawBody ?? (body === undefined ? undefined : JSON.stringify(body)),
@@ -157,6 +159,85 @@ try {
     assert.equal((await call('POST', '/status', { state: 'idle', paused: true }, alice)).status, 200)
     const a = await aliceSeenBy(bob)
     assert.deepEqual([a.presence, a.action, a.subject, a.activityAgoSec], ['idle', '', '', null])
+    // 0.5.6：暫停是成員層級，要明確送 paused: false 才解除（接下來的測試要看得到 working）
+    assert.equal((await call('POST', '/status', { state: 'idle', paused: false }, alice)).status, 200)
+  })
+  await check('暫停分享 → 好友只看得到在線：送 working＋paused 也只顯示 idle，沒有動態與時間（0.5.6 隱私承諾）', async () => {
+    const P = { conn: 'convPPPPPPPP' }
+    assert.equal((await call('POST', '/status', { ...P, state: 'working', action: 'learning', subject: 'game' }, alice)).status, 200)
+    assert.equal((await aliceSeenBy(bob)).presence, 'working', '前提：沒暫停時好友看得到工作中')
+    assert.equal((await call('POST', '/status', { ...P, state: 'working', paused: true }, alice)).status, 200)
+    const a = await aliceSeenBy(bob)
+    assert.deepEqual([a.presence, a.action, a.subject, a.activityAgoSec], ['idle', '', '', null], '暫停後 working 不外漏')
+    // 同一人另一個還沒讀到暫停的對話（working）：一樣降成 idle
+    const Q = { conn: 'convQQQQQQQQ' }
+    assert.equal((await call('POST', '/status', { ...Q, state: 'working' }, alice)).status, 200)
+    assert.equal((await aliceSeenBy(bob)).presence, 'idle', '成員層級暫停：另一個對話晚到的 working 心跳也不外漏（不用等下一次 paused）')
+    assert.equal((await call('POST', '/status', { ...P, state: 'idle', paused: true }, alice)).status, 200)
+    assert.equal((await aliceSeenBy(bob)).presence, 'idle', '別的對話的 working 也不外漏')
+    await call('POST', '/status', { ...Q, state: 'offline' }, alice)
+    await call('POST', '/status', { ...P, state: 'offline' }, alice)
+    await call('POST', '/status', { ...P, state: 'idle', paused: false }, alice) // 明確繼續，後面的測試才看得到 working
+    await call('POST', '/status', { ...P, state: 'offline' }, alice)
+  })
+  await check('暫停是成員層級（0.5.6）：兩個對話交錯送心跳，一個送 paused 之後另一個晚到的 working／動態都不外漏，直到明確 resume', async () => {
+    const A = { conn: 'convPausAAAA' }
+    const B = { conn: 'convPausBBBB' }
+    const seen = async () => { const a = await aliceSeenBy(bob); return [a.presence, a.action, a.subject, a.activityAgoSec] }
+    // 前提：沒暫停時兩個對話的 working 與動態都看得到
+    assert.equal((await call('POST', '/status', { ...A, state: 'working', action: 'learning', subject: 'game' }, alice)).status, 200)
+    assert.equal((await call('POST', '/status', { ...B, state: 'working' }, alice)).status, 200)
+    assert.deepEqual((await seen()).slice(0, 3), ['working', 'learning', 'game'], '前提：沒暫停時看得到')
+    // A 暫停；B 還沒讀到暫停，之後才送來的 working 心跳（R056b 的空窗）
+    assert.equal((await call('POST', '/status', { ...A, state: 'idle', paused: true }, alice)).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', '', null], 'A 暫停後')
+    assert.equal((await call('POST', '/status', { ...B, state: 'working' }, alice)).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', '', null], 'B 晚到的 working 心跳不能讓好友看到工作中')
+    // B 晚到的新動態也不收；A 沒帶 paused 的心跳（working）也一樣
+    assert.equal((await call('POST', '/status', { ...B, state: 'working', action: 'fixing-bugs', subject: 'website' }, alice)).status, 200)
+    assert.equal((await call('POST', '/status', { ...A, state: 'working' }, alice)).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', '', null], 'B 晚到的動態與 A 沒帶 paused 的心跳都不外漏')
+    assert.equal((await call('GET', '/friends', undefined, bob)).data.members.find(m => m.name === 'Alice').activityAgoSec, null)
+    // 暫停期間回給自己的列表也一樣
+    assert.equal((await call('POST', '/status', { ...B, state: 'working' }, alice)).data.members.find(m => m.isMe).presence, 'idle')
+    // 明確 resume（任一對話送 paused: false）後才恢復；之後 B 的 working 看得到、動態收得到
+    assert.equal((await call('POST', '/status', { ...A, state: 'idle', paused: false }, alice)).status, 200)
+    assert.equal((await call('POST', '/status', { ...B, state: 'working', action: 'fixing-bugs', subject: 'website' }, alice)).status, 200)
+    assert.deepEqual((await seen()).slice(0, 3), ['working', 'fixing-bugs', 'website'], 'resume 後恢復')
+    await call('POST', '/status', { ...A, state: 'offline' }, alice)
+    await call('POST', '/status', { ...B, state: 'offline' }, alice)
+  })
+  await check('舊版外掛（沒帶版本或 0.5.6 以前）從不送 paused:false：沒帶 paused 的心跳＝繼續，不會被卡在暫停；0.5.6 以上沒帶 paused 不解除', async () => {
+    const L = { conn: 'convLegacy001' }
+    const seen = async () => (await aliceSeenBy(bob)).presence
+    for (const v of ['', '0.5.5', '0.4.0', 'web']) {
+      assert.equal((await call('POST', '/status', { ...L, state: 'idle', paused: true }, alice, undefined, undefined, v)).status, 200)
+      assert.equal((await call('POST', '/status', { ...L, state: 'working' }, alice, undefined, undefined, v)).status, 200)
+      assert.equal(await seen(), 'working', `版本「${v}」按過暫停、再按繼續（只是不再帶 paused）後要能看到工作中`)
+    }
+    for (const v of ['0.5.6', '0.5.7', '0.6.0', '1.0.0']) {
+      assert.equal((await call('POST', '/status', { ...L, state: 'idle', paused: true }, alice, undefined, undefined, v)).status, 200)
+      assert.equal((await call('POST', '/status', { ...L, state: 'working' }, alice, undefined, undefined, v)).status, 200)
+      assert.equal(await seen(), 'idle', `版本 ${v}：沒帶 paused 不解除`)
+      assert.equal((await call('POST', '/status', { ...L, state: 'working', paused: false }, alice, undefined, undefined, v)).status, 200)
+      assert.equal(await seen(), 'working')
+    }
+    await call('POST', '/status', { ...L, state: 'offline' }, alice)
+  })
+  await check('暫停旗標：算在成員身上、要寫進資料庫（重啟後仍暫停）；亂值被拒且不動旗標', async () => {
+    const g = { ownerId: 'o', members: { o: { name: 'O', conns: {}, action: '', subject: '', activityAt: 0, seenAt: 0 } } }
+    const mem = g.members.o
+    assert.equal(core.status(g, 'o', mem, { conn: 'convUnit0001', state: 'working' }, 1000, '0.5.6')[2], false)
+    assert.equal(core.status(g, 'o', mem, { conn: 'convUnit0001', state: 'working', paused: true }, 2000, '0.5.6')[2], true, '開始暫停要寫進資料庫')
+    assert.equal(mem.paused, true)
+    assert.equal(core.status(g, 'o', mem, { conn: 'convUnit0002', state: 'working', paused: 'no' }, 3000, '0.5.6')[0], 400)
+    assert.equal(mem.paused, true, '被拒的請求不動旗標')
+    assert.equal(core.presence(mem, 3000), 'idle')
+    mem.conns.convUnit0009 = { state: 'working', seenAt: 3000 } // 就算有連線直接記著 working（例如重啟前存的），讀的時候也只算在線
+    assert.equal(core.presence(mem, 3000), 'idle', 'presence 讀取時也擋')
+    assert.equal(core.status(g, 'o', mem, { conn: 'convUnit0002', state: 'working', paused: false }, 4000, '0.5.6')[2], true, '繼續也要寫進資料庫')
+    assert.equal(mem.paused, undefined)
+    assert.equal(core.status(g, 'o', mem, { conn: 'convUnit0002', state: 'working', paused: false }, 5000, '0.5.6')[2], false, '重複繼續不重寫')
   })
   await check('同一人兩個對話：一個有動態、一個只送心跳，好友看到的動態不跳（10-11 抓到的 bug）', async () => {
     const A = { conn: 'convAAAAAAAA' }
@@ -351,6 +432,69 @@ try {
     assert.ok(f.data.members.some(m => m.name === 'Zed'), JSON.stringify(f.data.members.map(m => m.name)))
     await call('POST', '/leave', {}, r.data)
   })
+  await check('改名：只能改自己、同名允許、好友列表更新、容量人數不變（ui-15）', async () => {
+    const owner = (await call('POST', '/groups', { name: 'RenameOwner' })).data
+    const friend = (await call('POST', '/join', { invite: owner.invite, name: 'RenameFriend' })).data
+    const before = (await call('GET', '/friends', undefined, owner)).data.members.length
+    assert.equal((await call('POST', '/name', { name: 'SameName' }, owner)).status, 200)
+    assert.equal((await call('POST', '/name', { name: 'SameName' }, friend)).status, 200, 'join 允許同名，rename 政策一致')
+    const names = (await call('GET', '/friends', undefined, owner)).data.members.map(m => m.name)
+    assert.deepEqual(names.sort(), ['SameName', 'SameName'])
+    assert.equal((await call('GET', '/friends', undefined, owner)).data.members.length, before, '改名不增減 membership')
+    assert.equal((await call('POST', '/name', { name: 'Hijack', memberId: owner.memberId }, friend)).status, 400, '不能指定別人的 memberId')
+  })
+  await check('看不見的填充字元當名字（U+3164／FFA0／115F／2800／034F／17B4／Tag）：建立與改名都擋，夾在中間的被清掉（0.5.6 盲審 #5）', async () => {
+    const IP = '203.0.113.77'
+    const fills = ['\u3164', '\uffa0', '\u115f\u1160', '\u2800', '\u034f', '\u17b4\u17b5', '\u{e0041}\u{e0042}', '\u{1d159}', '\u3164\u3164\u3164']
+    for (const fill of fills) {
+      assert.equal((await call('POST', '/groups', { name: fill }, undefined, undefined, IP)).status, 400, 'create ' + JSON.stringify(fill))
+    }
+    const owner = (await call('POST', '/groups', { name: 'A\u3164B\u2800C' }, undefined, undefined, IP)).data
+    const me = (await call('GET', '/friends', undefined, owner)).data.members.find(m => m.isMe)
+    assert.equal(me.name, 'ABC', '夾在中間的填充字元被清掉')
+    for (const fill of fills) {
+      assert.equal((await call('POST', '/name', { name: fill }, owner)).status, 400, 'rename ' + JSON.stringify(fill))
+      assert.equal((await call('POST', '/name', { name: 'X' + fill }, owner)).status, 400, 'rename X+' + JSON.stringify(fill))
+    }
+    const joiner = await call('POST', '/join', { invite: owner.invite, name: '\u3164' }, undefined, undefined, IP)
+    assert.equal(joiner.status, 400, 'join 只有填充字元')
+  })
+  await check('改名：長度、控制／零寬／RTL、額外欄位先於寫入與限速拒絕（ui-15）', async () => {
+    const owner = (await call('POST', '/groups', { name: 'ValidBefore' })).data
+    for (const name of ['', 'A'.repeat(21), 'Bad\u0007', 'Zero\u200bWidth', 'RTL\u202eName']) {
+      assert.equal((await call('POST', '/name', { name }, owner)).status, 400, JSON.stringify(name))
+    }
+    assert.equal((await call('POST', '/name', { name: 'Bad\u200b' }, 'Bearer malformed')).status, 400, '輸入檢查先於成員金鑰 hash')
+    assert.equal((await call('POST', '/name', { name: 'Good', extra: true }, owner)).status, 400)
+    assert.equal((await call('POST', '/name', { name: 'Good' }, owner)).status, 200, '非法輸入沒有先吃掉成員冷卻')
+    assert.equal((await call('POST', '/name', { name: 'TooSoon' }, owner)).status, 429)
+    const me = (await call('GET', '/friends', undefined, owner)).data.members.find(m => m.isMe)
+    assert.equal(me.name, 'Good', '被拒的改名不能寫入')
+  })
+  await check('改名核心：同一成員 60 秒一次，時鐘倒退可恢復；檢查都先於寫入（ui-15）', async () => {
+    const made = await core.createGroup({ name: 'CoreRename' }, 1_000)
+    const mem = made.g.members[made.g.ownerId]
+    assert.deepEqual(core.rename(mem, { name: 'First' }, 10_000), [200, { ok: true }])
+    assert.equal(core.rename(mem, { name: 'Second' }, 69_999)[0], 429)
+    assert.equal(mem.name, 'First')
+    assert.equal(core.rename(mem, { name: 'Second' }, 70_000)[0], 200)
+    assert.equal(core.rename(mem, { name: 'ClockBack' }, 1)[0], 200)
+    assert.equal(mem.name, 'ClockBack')
+  })
+  await check('限速 fixed window：59,999 ms 仍在窗內，恰好 60,000 ms 已重置', async () => {
+    const limit = core.makeLimiter()
+    assert.equal(limit('rename:boundary', 1, core.RENAME_GLOBAL_WINDOW_MS, 10_000), false)
+    assert.equal(limit('rename:boundary', 1, core.RENAME_GLOBAL_WINDOW_MS, 69_999), true)
+    assert.equal(limit('rename:boundary', 1, core.RENAME_GLOBAL_WINDOW_MS, 70_000), false)
+  })
+  await check('改名：同一來源 IP 每分鐘最多 30 次，其他 IP 不受影響（ui-15）', async () => {
+    const owners = []
+    for (let i = 0; i <= core.RENAME_GLOBAL_MAX; i++) owners.push((await call('POST', '/groups', { name: `Global${i}` }, undefined, undefined, `198.51.100.${i + 1}`)).data)
+    const sharedIp = '203.0.113.200'
+    for (let i = 0; i < core.RENAME_GLOBAL_MAX; i++) assert.equal((await call('POST', '/name', { name: `Renamed${i}` }, owners[i], undefined, sharedIp)).status, 200)
+    assert.equal((await call('POST', '/name', { name: 'Blocked' }, owners[core.RENAME_GLOBAL_MAX], undefined, sharedIp)).status, 429)
+    assert.equal((await call('POST', '/name', { name: 'OtherIp' }, owners[core.RENAME_GLOBAL_MAX], undefined, '203.0.113.201')).status, 200)
+  })
   await check('錯的邀請碼被拒', async () => {
     const r = await call('POST', '/join', { invite: alice.groupId + '.wrong', name: 'Mallory' })
     assert.equal(r.status, 403)
@@ -378,6 +522,36 @@ try {
     alice.invite = k.data.invite
     alice.inviteGeneration = k.data.inviteGeneration
     assert.equal((await call('POST', '/join', { invite: alice.invite, name: 'Dan' })).status, 200)
+  })
+  await check('踢人：找不到這個人 → 404（已經被踢的人再踢一次也是），請求本身不對（沒給 id、踢自己）仍是 400；404 不換邀請碼（0.5.6）', async () => {
+    const testIp = '192.0.2.172'
+    const go = (method, path, body, member) => call(method, path, body, member, undefined, testIp)
+    const owner = (await go('POST', '/groups', { name: 'KickOwner' })).data
+    const friend = (await go('POST', '/join', { invite: owner.invite, name: 'KickFriend' })).data
+    const first = await go('POST', '/kick', { memberId: friend.memberId }, owner)
+    assert.equal(first.status, 200)
+    const again = await go('POST', '/kick', { memberId: friend.memberId }, owner)
+    assert.equal(again.status, 404, '重試已經成功的踢人：找不到這個人是 404，不是 400')
+    assert.deepEqual(again.data, { error: '找不到這個人' })
+    assert.equal((await go('POST', '/kick', { memberId: 'nobodyAtAll' }, owner)).status, 404)
+    assert.equal((await go('POST', '/kick', {}, owner)).status, 400)
+    assert.equal((await go('POST', '/kick', { memberId: 123 }, owner)).status, 400)
+    assert.equal((await go('POST', '/kick', { memberId: owner.memberId }, owner)).status, 400, '踢自己是請求不對')
+    assert.equal((await go('POST', '/join', { invite: first.data.invite, name: 'StillValid' })).status, 200, '404 沒有換掉邀請碼')
+  })
+  await check('原群主離開：接任者可換邀請碼與移除朋友，非群主仍被拒', async () => {
+    const testIp = '192.0.2.171'
+    const go = (method, path, body, member) => call(method, path, body, member, undefined, testIp)
+    const original = (await go('POST', '/groups', { name: 'OriginalOwner' })).data
+    const successor = (await go('POST', '/join', { invite: original.invite, name: 'Successor' })).data
+    const ordinary = (await go('POST', '/join', { invite: original.invite, name: 'Ordinary' })).data
+    assert.equal((await go('POST', '/leave', {}, original)).status, 200)
+    const self = (await go('GET', '/friends', undefined, successor)).data.members.find(m => m.isMe)
+    assert.equal(self.isOwner, true)
+    assert.equal((await go('POST', '/kick', { memberId: successor.memberId }, ordinary)).status, 403)
+    assert.equal((await go('POST', '/invite/rotate', {}, successor)).status, 200)
+    assert.equal((await go('POST', '/kick', { memberId: ordinary.memberId }, successor)).status, 200)
+    assert.equal((await go('GET', '/friends', undefined, ordinary)).status, 401)
   })
   await check('L-SEC-ROTATE-1: generations are monotonic, concurrent rotations are unique, and lists do not leak invites', async () => {
     const testIp = '192.0.2.170'
@@ -463,7 +637,7 @@ try {
       ])
       const bad = []
       const okCount = {}
-      const routes = [['POST', '/groups'], ['POST', '/join'], ['POST', '/status'], ['GET', '/friends'], ['POST', '/invite/rotate'], ['POST', '/kick'], ['POST', '/leave'], ['GET', '/health']]
+      const routes = [['POST', '/groups'], ['POST', '/join'], ['POST', '/status'], ['GET', '/friends'], ['POST', '/invite/rotate'], ['POST', '/kick'], ['POST', '/name'], ['POST', '/leave'], ['GET', '/health']]
       // 前面的 /join 會把群組塞滿（10 人），/kick、/leave 要用的臨時成員就進不來：先清空（踢人會換邀請碼）
       const makeRoom = async () => {
         for (const m of (await call('GET', '/friends', undefined, owner, undefined, nextIp())).data.members.filter(x => !x.isMe)) {
@@ -485,6 +659,7 @@ try {
           if (path === '/join' && rand() < 0.3) body = JSON.stringify({ ...fuzzBody(), invite, name: rand() < 0.5 ? fuzzValue() : 'J' })
           const isRealKick = path === '/kick' && rand() < 0.1
           if (isRealKick) { const tmp = await fresh(); if (tmp.memberId) body = JSON.stringify({ memberId: tmp.memberId }) }
+          if (path === '/name' && rand() < 0.1) body = JSON.stringify({ name: `N${i}` })
           const ct = rand() < 0.05 ? pick(['text/plain', 'application/jsonx', '']) : 'application/json'
           const status = await raw(method, path, body, authHeader, ct)
           if (status >= 200 && status < 300) okCount[path] = (okCount[path] ?? 0) + 1
@@ -537,7 +712,7 @@ try {
   await check('群組代碼是 __proto__／constructor／toString → 每條要登入的路都 401，加入跟「沒這個群組」一樣 403（sec-10）', async () => {
     for (const gid of ['__proto__', 'constructor', 'toString']) {
       const authHeader = `Bearer ${gid}.${alice.memberId}.${alice.memberKey}`
-      for (const [method, path, body] of [['GET', '/friends'], ['POST', '/status', { state: 'idle' }], ['POST', '/invite/rotate', {}], ['POST', '/kick', { memberId: bob.memberId }], ['POST', '/leave', {}]]) {
+      for (const [method, path, body] of [['GET', '/friends'], ['POST', '/status', { state: 'idle' }], ['POST', '/invite/rotate', {}], ['POST', '/kick', { memberId: bob.memberId }], ['POST', '/name', { name: 'Valid' }], ['POST', '/leave', {}]]) {
         assert.equal((await call(method, path, body, authHeader, undefined, '192.0.2.60')).status, 401, `${gid} ${path}`)
       }
       const unknown = (await call('POST', '/join', { invite: 'zzzzzzzzzzzz.x', name: 'Q' }, undefined, undefined, '192.0.2.61')).status
@@ -935,7 +1110,7 @@ try {
   await check('內文不是 JSON 物件（null、陣列、數字、字串、布林）→ 400 固定句子，不動任何東西；Node 上也不算加入次數（fix-7）', async () => {
     const owner = (await call('POST', '/groups', { name: 'ObjA' }, undefined, undefined, '192.0.2.91')).data
     for (const raw of ['null', '[]', '[1,2]', '5', '"x"', 'true']) {
-      for (const path of ['/status', '/invite/rotate', '/kick', '/leave']) {
+      for (const path of ['/status', '/invite/rotate', '/kick', '/name', '/leave']) {
         const r = await call('POST', path, undefined, owner, raw, '192.0.2.91')
         assert.equal(r.status, 400, path + ' ' + raw)
         assert.equal(r.data.error, '請求格式錯誤', path + ' ' + raw)
@@ -1037,7 +1212,7 @@ try {
     assert.equal(joined[0], 200)
     assert.equal(made.g.members[joined[1].memberId].ver, '0.5.0')
   })
-  await check('任何回應的 JSON 裡都沒有 ver（建群組、加入、狀態、好友列表、換邀請碼、踢人、離開，帶版本標頭；ver-2c）', async () => {
+  await check('任何回應的 JSON 裡都沒有 ver（建群組、加入、狀態、好友列表、換碼、踢人、改名、離開；ver-2c）', async () => {
     const hasVer = x => {
       if (Array.isArray(x)) return x.some(hasVer)
       if (x && typeof x === 'object') return Object.entries(x).some(([k, v]) => k === 'ver' || hasVer(v))
@@ -1059,6 +1234,7 @@ try {
     assert.equal(f.status, 200)
     assert.equal(f.data.members.length, 2)
     assert.equal((await go('POST', '/invite/rotate', {}, owner)).status, 200)
+    assert.equal((await go('POST', '/name', { name: 'NoVerRenamed' }, owner)).status, 200)
     assert.equal((await go('POST', '/kick', { memberId: friend.memberId }, owner)).status, 200)
     assert.equal((await go('POST', '/leave', {}, owner)).status, 200)
   })

@@ -45,7 +45,7 @@ export type StatusBody = {
   conn: string
   action?: string
   subject?: string
-  paused?: true
+  paused?: boolean
   version?: string
 }
 
@@ -69,6 +69,8 @@ declare module 'claude-code' {
       lang: 'en' | 'zh-TW'
       update: UpdateView
       whatsNew: WhatsNewView
+      removed: boolean
+      demoHidden: boolean
     }
   }
 }

@@ -28,11 +28,16 @@ export function initial(name: string): string {
   return first.toUpperCase()
 }
 
-/** 同一個成員永遠同一個顏色 */
-export function fillFor(id: string): string {
+/** 同一個成員永遠同一個顏色：回 FILLS 的第幾個（移除確認框用它說「藍色頭像」，見 register.tsx removeWho） */
+export function fillIndexFor(id: string): number {
   let h = 0
   for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  return FILLS[h % FILLS.length] ?? FILLS[0]!
+  return h % FILLS.length
+}
+
+/** 同一個成員永遠同一個顏色 */
+export function fillFor(id: string): string {
+  return FILLS[fillIndexFor(id)] ?? FILLS[0]!
 }
 
 // ui-8（主人 10-12 選「像 Spotify 好友動態」的版面）：不畫外環，改在右上角一個小點（工作中綠、閒置黃、離線不畫）

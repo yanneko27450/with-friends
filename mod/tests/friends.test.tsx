@@ -3,13 +3,14 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { CommandRunResult, On } from 'claude-code'
 
-import { AVATAR_EMOJI, avatarSvg, initial } from '../hooks/avatar'
+import { AVATAR_EMOJI, avatarSvg, initial, fillIndexFor } from '../hooks/avatar'
 import { AVATAR_ART } from '../hooks/avatar-art'
 import { ACTION_LABEL, ACTIONS, activityText, AVATARS, SUBJECT_LABEL, SUBJECTS } from '../hooks/taxonomy'
-import { activityOf, AUTO_MAX_TRIES, AUTO_RETRY_MS, classifyActivity, DEFAULT_RELAY, errorText, friendsFrom, inviteLink, isHiddenDir, isNewer, isValidRelayResponse, langOf, marketplaceUrl, membershipFrom, parseInvite, RelayError, relayOrigin, statusBody, statusText, SUBCOMMANDS, UPDATE_CHECK_MS, WHATS_NEW_MS, whatsNewVersions, membershipOf, isSecureRelay } from '../hooks/register'
+import { activityOf, AUTO_MAX_TRIES, AUTO_RETRY_MS, classifyActivity, DEFAULT_RELAY, errorText, friendsFrom, inviteLink, isHiddenDir, isNewer, isValidRelayResponse, langOf, marketplaceUrl, membershipFrom, parseInvite, RelayError, relayOrigin, statusBody, statusText, SUBCOMMANDS, UPDATE_CHECK_MS, WHATS_NEW_MS, whatsNewVersions, membershipOf, isSecureRelay, removeMember, removeWho } from '../hooks/register'
 import { SOURCE_URL, STRINGS } from '../hooks/i18n'
+import { DEMO_BOT_SHOW_BELOW } from '../hooks/demo-bot'
 import { cellWidth, CHANGELOG, changelogRows, PICKER_CHROME } from '../hooks/changelog'
-import { cleanName } from '../hooks/text'
+import { cleanName, isValidNameInput } from '../hooks/text'
 import { redact, RULES } from '../hooks/redact'
 import { CLASSIFY_40 } from './fixtures/classify-40'
 import { SEC16B_TEST_KEY } from './fixtures/sec-16b-test-key'
@@ -49,6 +50,7 @@ type Setup = {
   replySequence?: Record<string, unknown[]>
   /** review fix：可把指定 store.set 暫停在真正寫入前，重現 read-check 與 write 間的競態。 */
   storeSetWait?: (key: string, value: unknown, ordinal: number) => Promise<void> | undefined
+  storeSetFail?: (key: string, value: unknown, ordinal: number) => Error | undefined
   storeGetWait?: (key: string, ordinal: number) => Promise<void> | undefined
   storeGetFail?: (key: string, ordinal: number) => Error | undefined
   storeDeleteWait?: (key: string, ordinal: number) => Promise<void> | undefined
@@ -76,6 +78,8 @@ type Setup = {
   focusDeny?: string
   /** sec-16b C：破壞或拿掉假中繼簽章。 */
   responseSignature?: 'wrong' | 'missing' | 'replay' | 'wrong-origin' | 'signed-other-nonce' | 'wrong-method' | 'wrong-path' | 'wrong-status' | 'wrong-body' | 'unknown-key-id' | 'noncanonical'
+  /** 模擬中繼已處理請求，但成功回應在傳輸途中遺失。 */
+  fetchFailAfter?: Record<string, Error>
   /** 不把一般測試導到已釘選的 relay.test；只用來檢查正式預設網址。 */
   officialRelay?: boolean
 }
@@ -119,7 +123,10 @@ function world(on: On, s: Setup = {}) {
   let storeSetOrdinal = 0
   on('store.set', async ($, e) => {
     storeSets.push(e.key)
-    await s.storeSetWait?.(e.key, e.value, ++storeSetOrdinal)
+    const ordinal = ++storeSetOrdinal
+    await s.storeSetWait?.(e.key, e.value, ordinal)
+    const failure = s.storeSetFail?.(e.key, e.value, ordinal)
+    if (failure) throw failure
     shared[e.key] = e.value
     return { value: undefined }
   })
@@ -212,6 +219,7 @@ function world(on: On, s: Setup = {}) {
     const h = e.init?.headers as Record<string, string> | undefined
     sent.push({ method, origin: url.origin, path: url.pathname, body, auth: h?.authorization, version: h?.['x-friends-version'], nonce: h?.['x-friends-nonce'] })
     await s.fetchWait?.(url.pathname, ordinal)
+    if (s.fetchFailAfter?.[url.pathname]) throw s.fetchFailAfter[url.pathname]
     if (s.relayDown) throw new Error('connect ECONNREFUSED ' + HOSTILE)
     const status = s.fail?.[url.pathname] ?? (s.oldRelay && url.pathname === '/status' && body?.version !== undefined ? 400 : undefined)
       ?? (url.pathname === '/status' && s.rejectActions?.includes(body?.action) ? 400 : undefined)
@@ -250,8 +258,11 @@ function world(on: On, s: Setup = {}) {
     if (url.pathname === '/groups') return signed({ ...MEMBERSHIP, invite: 'g1-newinvite' })
     // 回多餘的 relay／name：模擬惡意中繼想把之後帶金鑰的請求導走
     if (url.pathname === '/join') return signed({ ...MEMBERSHIP, relay: 'http://evil.test', memberId: 'm2', memberKey: 'k2', isOwner: false })
-    if (url.pathname === '/friends') return signed({ groupName: 'Study group', members: s.friends ?? [ME_ROW] })
-    if (url.pathname === '/status') return signed({ ok: true, groupName: 'Study group', members: s.friends ?? [ME_ROW] })
+    const defaultRoster = () => s.friends ?? [{ ...ME_ROW, isOwner: (shared.membership as any)?.isOwner === true }]
+    if (url.pathname === '/friends') return signed({ groupName: 'Study group', members: defaultRoster() })
+    if (url.pathname === '/status') return signed({ ok: true, groupName: 'Study group', members: defaultRoster() })
+    if (url.pathname === '/kick') return signed({ ok: true, invite: 'g1-afterkick', inviteGeneration: 1 })
+    if (url.pathname === '/name') return signed({ ok: true })
     return signed({ ok: true })
   })
   // A second hooks instance reaches the same persistent store through another client.
@@ -378,7 +389,7 @@ test('sec-6a：常見密碼句型、Bearer、GitLab token 也遮掉', async () =
     ['api-key: 1234abcd', '1234abcd'],
     ['Authorization: Bearer 7iDEMcYnx2EN1TYjDktjAoIz', '7iDEMcYnx2EN1TYjDktjAoIz'],
     ['x-api-key: 2e-mGoSJNHdT0xO99CYakvfnfMU', 'mGoSJNHdT0'],
-    ['glpat' + '-aB3dE5fG7hJ9kL1mN2pQ', 'aB3dE5fG7h'],
+    ['glpat' + '-aB3dE5fG7hJ9kL1mN2pQ', 'aB3dE5fG7h'], // 執行時才組合：避免 GitHub 推送保護把假字串當成真的 GitLab token
     ['PASSWORD="hunter 2 with spaces"', 'with spaces'],
     // 審查必修：中文關鍵字前面接英數字也要遮
     ['Wi-Fi密碼：hunter2', 'hunter2'],
@@ -541,7 +552,10 @@ test('test-2：isHiddenDir 子資料夾、大小寫、結尾斜線、反斜線�
 })
 
 test('test-2：statusBody／activityOf：暫停只送 paused、不帶動態；同一組動態不重送；不分享的資料夾送 other', async () => {
-  expect(statusBody({ ...ME0, isPaused: true, action: 'learning', subject: 'game' }, 'c1', '')).toEqual({ state: 'working', conn: 'c1', paused: true })
+  expect(statusBody({ ...ME0, isPaused: true, action: 'learning', subject: 'game' }, 'c1', '')).toEqual({ state: 'idle', conn: 'c1', paused: true })
+  // 0.5.6 隱私承諾：暫停時好友只看得到在線——working 不外漏，idle／offline 照舊
+  expect(statusBody({ ...ME0, state: 'working', isPaused: true }, 'c1', '').state).toBe('idle')
+  expect(statusBody({ ...ME0, state: 'idle', isPaused: true }, 'c1', '').state).toBe('idle')
   const sent = JSON.stringify({ action: 'learning', subject: 'game' })
   expect(statusBody({ ...ME0, action: 'learning', subject: 'game' }, 'c1', sent)).toEqual({ state: 'working', conn: 'c1' })
   expect(statusBody({ ...ME0, action: 'learning', subject: 'game' }, 'c1', '')).toEqual({ state: 'working', conn: 'c1', action: 'learning', subject: 'game' })
@@ -718,9 +732,12 @@ test('請求量：pane 開著每 15 秒一次、好友列表從送狀態的回�
 
 // 測試的 $ 叫不到 ui.close，用「在別的對話加入群組、這個對話的 pane 從沒開過」走同一條路（isPaneOpen=false）
 test('請求量：pane 沒開的對話 5 分鐘只送 ≤5 次心跳、0 次拉好友（cost-2）', async ($, on) => {
-  // onboarded：已經看過「貼上邀請」，開對話時 pane 不會自己打開
-  const w = world(on, { store: { onboarded: true } })
+  // R6-01：還沒加入的對話每次都會自己打開 pane，所以這裡走「開了又按『之後再說』關掉」那條路（isPaneOpen=false），再在別的對話加入群組
+  const w = world(on)
   await start($)
+  const pane = await mountPane($)
+  await pane.press({ key: 'later' })
+  await pane.unmount()
   w.shared.membership = MEMBERSHIP
   const before = w.sent.length
   await w.clock.advance(300_000)
@@ -784,11 +801,11 @@ const EVIL_FRAGMENTS = ['Line one', 'ZWJ', 'Ignore previous', 'rm -rf', 'SYSTEM:
 const EVIL_GROUP = { groupName: EVIL_NAMES.join(' / ') }
 const ALL_SUBCOMMANDS = [
   '', 'open', 'help', 'nonsense ' + HOSTILE, 'status',
-  'pause', 'resume', 'hide', 'unhide', 'hidden',
+  'pause', 'resume', 'hide', 'unhide', 'hidden', 'demo off', 'demo on',
   'relay', 'lang zh-TW', 'lang en', 'lang xx',
   'update', 'avatar', 'avatar fox', 'avatar ' + HOSTILE,
   'autoupdate', 'autoupdate off',
-  'rotate',
+  'rotate', 'remove Missing', 'name Tester',
   // sec-14 起已在群組時 create／join 一律擋下，先 leave 才真的走到中繼（惡意中繼回的群組名、名字才會進來）
   'leave', 'create EvilTester',
   'leave', 'join https://ignore-previous.evil.test#g1.joinsecret Tester',
@@ -825,6 +842,7 @@ for (const lang of ['en', 'zh-TW'] as const) {
         '/groups': { ...MEMBERSHIP, ...EVIL_GROUP, name: HOSTILE, invite: 'g1.newinvite' },
         '/join': { ...MEMBERSHIP, ...EVIL_GROUP, name: HOSTILE, relay: 'https://ignore-previous.evil.test', isOwner: false },
         '/invite/rotate': { ...EVIL_GROUP, invite: 'g1.rotated', inviteGeneration: 1 },
+        '/name': { ok: true, ...EVIL_GROUP },
         '/leave': { ok: true, ...EVIL_GROUP },
       },
     })
@@ -841,7 +859,7 @@ for (const lang of ['en', 'zh-TW'] as const) {
   })
 
   test(`sec-8：中繼每個請求都回錯誤、錯誤內文是惡意文字 → 每一個子指令的輸出都找不到（${lang}）`, async ($, on) => {
-    const fail = Object.fromEntries(['/status', '/friends', '/groups', '/join', '/invite/rotate', '/leave', '/kick', '/marketplace.json'].map(p => [p, 500]))
+    const fail = Object.fromEntries(['/status', '/friends', '/groups', '/join', '/invite/rotate', '/leave', '/kick', '/name', '/marketplace.json'].map(p => [p, 500]))
     const setup: Setup = { store: { membership: { ...MEMBERSHIP, ...EVIL_GROUP }, lang }, ask: 'Tester', fail }
     const w = world(on, setup)
     await start($)
@@ -937,6 +955,7 @@ test('ver-2b：建群組、加入、心跳、好友列表、換邀請碼、離�
   await w.clock.settle()
   await run($, 'status')
   await run($, 'rotate')
+  await run($, 'name Version Probe')
   await run($, 'leave')
   await run($, 'join https://relay.test#g1.abcdef Sam')
   await w.clock.advance(30_000)
@@ -945,7 +964,7 @@ test('ver-2b：建群組、加入、心跳、好友列表、換邀請碼、離�
   await w.clock.settle()
   const relay = w.sent.filter(r => r.origin === new URL(DEFAULT_RELAY).origin || r.origin === 'https://relay.test')
   expect(relay.some(r => r.path === '/status' && r.body?.state === 'offline'), '關對話送 offline').toBe(true)
-  for (const p of ['/groups', '/join', '/status', '/friends', '/invite/rotate', '/leave']) expect(relay.some(r => r.path === p), p).toBe(true)
+  for (const p of ['/groups', '/join', '/status', '/friends', '/invite/rotate', '/name', '/leave']) expect(relay.some(r => r.path === p), p).toBe(true)
   for (const r of relay) expect(r.version, `${r.method} ${r.path}`).toBe('0.4.7')
 })
 
@@ -1019,7 +1038,8 @@ test('ui-29k：矮 pane 含自己真實列時，三種介面顯示列＋收起�
     const shown = (await ui.findAll({ type: 'Text', text: 'Planning · a game' })).length
     const hidden = Number(/\d+/.exec(String(more?.text))?.[0])
     expect(shown + hidden, `${surface}：顯示列 ${shown}＋收起 ${hidden}＝自己與六位好友`).toBe(7)
-    expect(String(more?.text), `${surface} 精確收起數`).toBe(surface === 'terminal' ? '+3 more' : '+6 more')
+    // ui-15：終端機多一列改名控制，所以同樣 8 行高度會再收起一位好友。
+    expect(String(more?.text), `${surface} 精確收起數`).toBe(surface === 'terminal' ? '+4 more' : '+6 more')
     await ui.unmount()
   }
 })
@@ -1736,8 +1756,9 @@ test('版本紀錄鈕：終端機放得下才畫；框框照舊分級（挑版�
   expect(bare, '不帶挑版本列比較矮（◀ 標題 ▶ 折行了）').toBeLessThan(own)
   expect(changelogRows(all.slice(0, 1), 100, pickerCells('en', 'terminal', '0.5.0')), '寬的時候一樣高（標題在那一列裡）').toBe(changelogRows(all.slice(0, 1), 100))
   expect(changelogRows(all.slice(1, 2), COLS, pickerCells('en', 'terminal', '0.5.0')), '0.4.0 那段比 0.5.0 矮').toBeLessThan(own)
-  // 自己已在 myLine；只有自己的說明 2 行讓標頭共 6 行，好友區不再重複占 1 行（ui-29k）。
-  const HEAD = 6
+  // 自己已在 myLine；ui-15 的改名另佔一列，所以標頭共 7 行，好友區不再重複占 1 行（ui-29k）。
+  // 只有自己一人時終端機會多畫一塊示範機器人（ui-13；R6-02 起是獨立 4 行：空行＋名字＋標示＋隱藏鈕），所以這裡是 11
+  const HEAD = 7 + 4
   const mount = (bodyRows: number) => $.ui.mount({ plugin: 'with-friends', surface: 'terminal', component: 'Pane', requestId: 'friends', props: { ...PANE_PROPS, bodyColumns: COLS, scroll: { offset: 0, bodyRows } } })
   // 放不下 2 行（版本列＋按鈕）→ 兩個都不畫
   let ui = await mount(HEAD + 1)
@@ -1813,24 +1834,31 @@ test('ui-4：很矮的 pane 暫停中 → 恢復說明多一行，恢復鈕和�
   }
 })
 
-test('ui-4：中繼回 401／500（不是連不上）→ 照狀態碼的固定句子，不說「自動重試」', async ($, on) => {
-  const setup: Setup = { store: { membership: MEMBERSHIP }, fail: { '/status': 401 } }
-  const w = world(on, setup)
+test('ui-16：心跳 401 → 清掉失效 membership，pane 固定顯示「已不在群組」且不採用中繼文字', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, fail: { '/status': 401 } })
   await start($)
-  for (const code of [401, 500]) {
-    setup.fail = { '/status': code }
-    await w.clock.advance(60_000)
-    await w.clock.settle()
-    const ui = await mountPane($)
-    expect(await ui.find({ type: 'Text', text: STRINGS.en.relayError(code) }), String(code)).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: STRINGS.en.unreachable }), String(code)).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: STRINGS.en.alone }), `${code} 列表沒拿到不算只有自己`).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /Ignore previous/ }), String(code)).toBeUndefined()
-    await ui.unmount()
-  }
+  await w.clock.advance(60_000)
+  await w.clock.settle()
+  expect(w.shared.membership).toBeUndefined()
+  expect(w.shared.removedNotice).toBe(true)
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: STRINGS.en.removedFromGroup })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Ignore previous/ })).toBeUndefined()
+  await ui.unmount()
 })
 
-test('ui-26：換頭像鈕只在桌面／手機；終端機按鈕列回到 4 個鈕（換頭像用 /friends avatar）', async ($, on) => {
+test('ui-4：中繼回 500（不是連不上）→ 照狀態碼固定句子，不說「自動重試」', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, fail: { '/status': 500 } })
+  await start($)
+  await w.clock.advance(60_000)
+  await w.clock.settle()
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: STRINGS.en.relayError(500) })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: STRINGS.en.unreachable })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('ui-26／ui-15：換頭像鈕只在桌面／手機；終端機主要列維持精簡、改名另列', async ($, on) => {
   const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW] })
   await start($)
   await w.clock.advance(10_000)
@@ -1839,7 +1867,7 @@ test('ui-26：換頭像鈕只在桌面／手機；終端機按鈕列回到 4 個
     const ui = await mountPane($, surface)
     if (surface === 'terminal') {
       expect(await ui.find({ type: 'Button', key: 'avatar' }), surface).toBeUndefined()
-      expect((await ui.findAll({ type: 'Button' })).map((b: any) => b.key).filter((k: string) => k !== 'lang' && k !== 'whatsnew')).toEqual(['pause', 'invite', 'refresh', 'leave'])
+      expect((await ui.findAll({ type: 'Button' })).map((b: any) => b.key).filter((k: string) => k !== 'lang' && k !== 'whatsnew')).toEqual(['pause', 'invite', 'refresh', 'leave', 'name', 'remove-term-f1', 'hide-demo-term'])
     } else {
       expect(await ui.find({ type: 'Button', key: 'avatar' }), surface).toBeDefined()
     }
@@ -2226,6 +2254,7 @@ test('sec-16b B：目前中繼的正常回應仍符合各端點契約', () => {
   expect(isValidRelayResponse('/friends', { members: [ME_ROW, BOB_ROW] }, member)).toBe(true)
   expect(isValidRelayResponse('/invite/rotate', { invite: 'g1.new', inviteGeneration: 1 }, member)).toBe(true)
   expect(isValidRelayResponse('/kick', { ok: true, invite: 'g1.new', inviteGeneration: 1 }, member)).toBe(true)
+  expect(isValidRelayResponse('/name', { ok: true }, member)).toBe(true)
   expect(isValidRelayResponse('/leave', { ok: true }, member)).toBe(true)
 })
 
@@ -2242,11 +2271,15 @@ test('sec-16b B：缺少自己、錯 memberId、重複或錯標 isMe 都拒收',
   }
 })
 
-test('sec-16b B：members 有非物件、空 id 或非 boolean isMe 時整份拒收', () => {
+test('sec-16b B：members 有非物件、空 id、非 boolean isMe，或 self isOwner 不是 boolean 時整份拒收', () => {
   for (const bad of [null, { ...BOB_ROW, id: '' }, { ...BOB_ROW, isMe: 'yes' }]) {
     const members = [ME_ROW, bad]
     expect(isValidRelayResponse('/status', { members }, MEMBERSHIP)).toBe(false)
     expect(isValidRelayResponse('/friends', { members }, MEMBERSHIP)).toBe(false)
+  }
+  for (const self of [{ ...ME_ROW, isOwner: 'yes' }, { ...ME_ROW, isOwner: undefined }]) {
+    expect(isValidRelayResponse('/status', { members: [self, BOB_ROW] }, MEMBERSHIP)).toBe(false)
+    expect(isValidRelayResponse('/friends', { members: [self, BOB_ROW] }, MEMBERSHIP)).toBe(false)
   }
 })
 
@@ -2256,6 +2289,7 @@ test('sec-16b B：每個非清單端點缺必要欄位都拒收', () => {
     ['/join', { ...MEMBERSHIP, isOwner: false }],
     ['/invite/rotate', { invite: 'g1.new', inviteGeneration: 1 }],
     ['/kick', { ok: true, invite: 'g1.new', inviteGeneration: 1 }],
+    ['/name', { ok: true }],
     ['/leave', { ok: true }],
   ]
   for (const [path, valid] of cases) {
@@ -2710,12 +2744,117 @@ test('多對話：別的對話按了暫停，這個對話下一輪就送 paused�
     expect(body.action).toBeUndefined()
   }
   w.shared.paused = false
+  w.shared.resumePending = 'tok-a' // 真實情況是按繼續的那個對話的 setPaused 寫的（共用 store）
   await w.clock.advance(180_000)
   await turn($, 'plan the boss fight again')
   await w.clock.settle()
   // 跟暫停前一樣的代碼也要再送（中繼在暫停時清掉了）
   expect(withActivity(w.sent).length).toBe(2)
+  // 0.5.6：成員層級暫停要明確 paused: false 才解除。別的對話按了繼續，這個對話下一輪送一次 paused: false（之後的心跳不再帶）
+  const resumed = statuses(w.sent).filter(b => b.paused === false)
+  expect(resumed).toHaveLength(1)
   expect(statuses(w.sent).at(-1)?.paused).toBeUndefined()
+})
+
+// 0.5.6：拿掉 register.tsx 的 isResumePending（或 statusBody 的 paused:false）→ 繼續後中繼永遠只算在線，這條變紅
+test('0.5.6：這個對話按「繼續」→ 下一個心跳明確送 paused:false；送失敗會重送到成功為止；其餘心跳不帶 paused', async ($, on) => {
+  const setup: Setup = { store: { membership: MEMBERSHIP, paused: true } }
+  const w = world(on, setup)
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect(statuses(w.sent).at(-1)).toMatchObject({ paused: true })
+  await run($, 'resume')
+  setup.fail = { '/status': 500 }
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  setup.fail = {}
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  await w.clock.advance(60_000)
+  await w.clock.settle()
+  const after = statuses(w.sent).slice(statuses(w.sent).findIndex(b => b.paused === false))
+  expect(after[0]).toMatchObject({ paused: false })
+  expect(statuses(w.sent).filter(b => b.paused === false).length, '失敗那次要重送').toBeGreaterThanOrEqual(2)
+  expect(after.at(-1)?.paused, '送成功後不再帶').toBeUndefined()
+})
+
+// 盲審必修 2：「繼續」的 paused:false 沒送到中繼，那個對話就結束了 → 待送記號在共用 store，之後新開的對話也要補送（不然中繼永遠卡在暫停）。
+// 把 resumePending 改回只放在模組變數 → 這條變紅
+test('0.5.6：按繼續的對話沒來得及送就結束 → 新開的對話（store 有 resumePending）第一個心跳補送 paused:false，200 之後清掉記號', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP, resumePending: 'tok-a' } })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect(statuses(w.sent)[0]).toMatchObject({ paused: false })
+  expect(w.shared.resumePending).toBeUndefined()
+  await w.clock.advance(60_000)
+  await w.clock.settle()
+  expect(statuses(w.sent).filter(b => b.paused === false)).toHaveLength(1)
+})
+
+// 複看必修：送 paused:false 的回應還在路上時又經過「暫停→繼續」，舊回應不能把新的待送記號清掉（記號是 token，比對相同才刪）。
+// 把清除改回「store 沒暫停就刪」→ 這條變紅
+test('0.5.6：paused:false 的回應還沒回來時又暫停再繼續 → 舊回應不清新的待送記號，之後仍會再送 paused:false', async ($, on) => {
+  let swapped = false
+  const w: any = world(on, {
+    store: { membership: MEMBERSHIP, resumePending: 'tok-1' },
+    // 帶 tok-1 的那個 /status（＝paused:false）送出去的當下：別的對話暫停又繼續（換成 tok-2）
+    onFetch: p => {
+      if (!swapped && p === '/status' && w.shared.resumePending === 'tok-1') {
+        swapped = true
+        w.shared.paused = false
+        w.shared.resumePending = 'tok-2'
+      }
+    },
+  })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect(swapped).toBe(true)
+  expect(w.shared.resumePending, '舊 token 的回應不能清掉新的').toBe('tok-2')
+  await w.clock.advance(20_000)
+  await w.clock.settle()
+  expect(statuses(w.sent).filter(b => b.paused === false).length).toBeGreaterThanOrEqual(2)
+  expect(w.shared.resumePending).toBeUndefined()
+})
+
+// 複看必修：先送出的 paused:true 晚到中繼、共用 token 已被別的對話清掉 → 送過 paused:true 的對話自己還是要補送 paused:false。
+// 拿掉 needsResume → 這條變紅
+test('0.5.6：這個對話送過 paused:true，之後 store 變成沒暫停但共用 token 已不在 → 仍補送一次 paused:false', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP, paused: true } })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect(statuses(w.sent).at(-1)).toMatchObject({ paused: true })
+  w.shared.paused = false // 別的對話按了繼續、用 token 送完並清掉了（store 裡沒有 resumePending）
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect(statuses(w.sent).filter(b => b.paused === false)).toHaveLength(1)
+  await w.clock.advance(60_000)
+  await w.clock.settle()
+  expect(statuses(w.sent).filter(b => b.paused === false), '送成功後不再帶').toHaveLength(1)
+})
+
+// 複看必修：paused:true 逾時／5xx（可能已到中繼、還比別人的 paused:false 晚到）也要記，不是等到 200 才記。把記號移回成功之後 → 這條變紅
+test('0.5.6：paused:true 送出但失敗（500）→ 之後共用 token 被別的對話清掉，這個對話仍補送 paused:false', async ($, on) => {
+  const setup: Setup = { store: { membership: MEMBERSHIP, paused: true }, fail: { '/status': 500 } }
+  const w = world(on, setup)
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect(statuses(w.sent).some(b => b.paused === true)).toBe(true)
+  setup.fail = {}
+  w.shared.paused = false // 別的對話按了繼續並用 token 送完、清掉了
+  await w.clock.advance(20_000)
+  await w.clock.settle()
+  expect(statuses(w.sent).filter(b => b.paused === false).length).toBeGreaterThanOrEqual(1)
+})
+
+test('0.5.6：statusBody 的 isResume 只在沒暫停時加 paused:false；暫停中仍是 paused:true', () => {
+  expect(statusBody({ ...ME0 }, 'c1', '', true)).toEqual({ state: ME0.state, conn: 'c1', paused: false })
+  expect(statusBody({ ...ME0 }, 'c1', '')).not.toHaveProperty('paused')
+  expect(statusBody({ ...ME0, isPaused: true }, 'c1', '', true)).toMatchObject({ paused: true })
 })
 
 test('多對話：pane 的「好友看到的你」用中繼上自己那一筆，不是這個對話的分類（ui-1d）', async ($, on) => {
@@ -2746,6 +2885,331 @@ test('多對話：結束對話只收掉這個對話的連線', async ($, on) => 
 
 const run = ($: any, args: string) =>
   $.command.run({ command: 'friends', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+
+// ---- ui-16：群主移除朋友；名字只用來本機比對，輸出與確認框都不回顯 ----
+test('ui-16：群主依唯一名字移除成功；確認框只放固定字彙描述（盲審 #4），輸出不含名字，新邀請世代寫回', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW], ask: STRINGS.en.removeYes })
+  await start($)
+  const r = await run($, 'remove Bob')
+  expect(r.text).toBe('Removed 1 friend.')
+  expect(r.text).not.toContain('Bob')
+  expect(w.asked).toHaveLength(1)
+  expect(w.asked[0].question).toBe(`Remove this friend? (${STRINGS.en.askRemoveBadge(fillIndexFor('f1'))}, Working)`)
+  expect(w.asked[0].question).not.toContain('Bob')
+  expect(w.sent.filter(x => x.path === '/kick')).toMatchObject([{ body: { memberId: 'f1' } }])
+  expect(w.shared.membership).toMatchObject({ invite: 'g1-afterkick', inviteGeneration: 1 })
+})
+
+test('ui-16：非群主固定拒絕，不問確認也不送 kick', async ($, on) => {
+  const self = { ...ME_ROW, isOwner: false }
+  const w = world(on, { store: { membership: { ...MEMBERSHIP, isOwner: false } }, friends: [self, BOB_ROW] })
+  await start($)
+  expect((await run($, 'remove Bob')).text).toBe(STRINGS.en.removeOwnerOnly)
+  expect(w.asked).toEqual([])
+  expect(w.sent.filter(x => x.path === '/kick')).toEqual([])
+})
+
+test('ui-16：找不到名字固定拒絕，不問確認也不送 kick', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW] })
+  await start($)
+  expect((await run($, 'remove Missing')).text).toBe(STRINGS.en.removeNotFound)
+  expect(w.asked).toEqual([])
+  expect(w.sent.filter(x => x.path === '/kick')).toEqual([])
+})
+
+test('ui-16：同名多人固定拒絕並請改用 pane，不問確認也不送 kick', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW, { ...BOB_ROW, id: 'f2' }] })
+  await start($)
+  expect((await run($, 'remove Bob')).text).toBe(STRINGS.en.removeAmbiguous)
+  expect(w.asked).toEqual([])
+  expect(w.sent.filter(x => x.path === '/kick')).toEqual([])
+})
+
+test('ui-16：確認取消不送 kick；中繼失敗只回固定句，不含名字或中繼文字', async ($, on) => {
+  const setup: Setup = { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW], ask: STRINGS.en.removeNo }
+  const w = world(on, setup)
+  await start($)
+  expect((await run($, 'remove Bob')).text).toBe(STRINGS.en.removeCancelled)
+  expect(w.sent.filter(x => x.path === '/kick')).toEqual([])
+  setup.ask = STRINGS.en.removeYes
+  setup.fail = { '/kick': 403 }
+  const failed = await run($, 'remove Bob')
+  expect(failed.text).toBe(STRINGS.en.removeFailed)
+  expect(failed.text ?? '').not.toContain('Bob')
+  expect(failed.text ?? '').not.toContain('Ignore previous')
+})
+
+// 盲審 #2：5xx 不能當「資料沒變」——Worker 可能已經寫入才出錯。拿掉 err.status <= 499 的限制（回到 <= 599）這條會變紅
+test('ui-16：中繼回 5xx（簽章過）→ 固定不確定句，不說「沒有移除」；4xx 才是確定失敗（盲審 #2）', async ($, on) => {
+  const setup: Setup = { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW], ask: STRINGS.en.removeYes }
+  const w = world(on, setup)
+  await start($)
+  for (const status of [500, 502, 503, 599]) {
+    setup.fail = { '/kick': status }
+    const r = await run($, 'remove Bob')
+    expect(r.text, String(status)).toBe(STRINGS.en.removeUncertain)
+    expect(r.text).not.toBe(STRINGS.en.removeFailed)
+    expect(w.shared.membership, '本機資料沒動').toEqual(MEMBERSHIP)
+  }
+  for (const status of [400, 403, 429]) {
+    setup.fail = { '/kick': status }
+    expect((await run($, 'remove Bob')).text, String(status)).toBe(STRINGS.en.removeFailed)
+  }
+  expect(w.sent.filter(x => x.path === '/kick')).toHaveLength(7)
+})
+
+// 0.5.6：中繼對「找不到這個人」回 404（不再是 400）。重試一次其實已經成功的踢人、或他剛好自己離開 → 404 = 他確定不在群組 → 目的已達成，
+// 不誤報「沒移除」；但「踢人一併換邀請碼」不能落空 → 補打 /invite/rotate 並存下新碼（盲審必修 3）。
+// 拿掉 removeMember 的 404 分支 → 回 removeFailed、紅；拿掉補換碼 → 邀請碼世代不變、紅
+test('ui-16：重試已成功的踢人 → 中繼 404（他已不在群組）→ 補換邀請碼、回「已移除」，不誤報沒移除；400 仍算失敗（0.5.6）', async ($, on) => {
+  const setup: Setup = {
+    store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW], ask: STRINGS.en.removeYes, fail: { '/kick': 404 },
+    reply: { '/invite/rotate': { invite: 'g1-afterrotate', inviteGeneration: 2 } },
+  }
+  const w = world(on, setup)
+  await start($)
+  const r = await run($, 'remove Bob')
+  expect(r.text).toBe(STRINGS.en.removedOne)
+  expect(r.text).not.toBe(STRINGS.en.removeFailed)
+  expect(r.text ?? '').not.toContain('Bob')
+  expect(w.shared.membership, '404 之後補換碼並存下新邀請碼').toMatchObject({ invite: 'g1-afterrotate', inviteGeneration: 2 })
+  expect(w.sent.filter(x => x.path === '/kick')).toHaveLength(1)
+  expect(w.sent.filter(x => x.path === '/invite/rotate')).toHaveLength(1)
+  setup.fail = { '/kick': 400 }
+  expect((await run($, 'remove Bob')).text).toBe(STRINGS.en.removeFailed)
+})
+
+test('ui-16：404 之後補換碼失敗 → 只能說不確定，不說已移除也不說沒移除，本機資料不動（0.5.6）', async ($, on) => {
+  const setup: Setup = { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW], ask: STRINGS.en.removeYes, fail: { '/kick': 404, '/invite/rotate': 500 } }
+  const w = world(on, setup)
+  await start($)
+  const r = await run($, 'remove Bob')
+  expect(r.text).toBe(STRINGS.en.removeUncertain)
+  expect(w.shared.membership).toEqual(MEMBERSHIP)
+})
+
+// 盲審 #4：確認框以前只有序號（中繼順序，跟畫面排序對不上）又允許同名。現在放頭像代碼／在線狀態，有同名就註明；仍不放名字
+test('ui-16：同名兩位 → 確認框分得出是哪一位（頭像代碼、狀態、另有同名），不含名字，kick 的 memberId 是按到的那位（盲審 #4）', async ($, on) => {
+  const twinA = { ...BOB_ROW, id: 'f1', avatar: 'cat', presence: 'working' }
+  const twinB = { ...BOB_ROW, id: 'f2', avatar: 'fox', presence: 'offline', action: '', subject: '', activityAgoSec: null, seenAgoSec: 7200 }
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, twinA, twinB], ask: STRINGS.en.removeNo })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  const ui = await mountPane($, 'desktop')
+  await ui.press({ key: 'remove-f1' })
+  await w.clock.settle()
+  await ui.press({ key: 'remove-off-f2' })
+  await w.clock.settle()
+  await ui.unmount()
+  const [qa, qb] = w.asked.map((x: any) => x.question)
+  expect(qa).toBe('Remove this friend? (🐱 cat, Working, another friend has the same name)')
+  expect(qb).toBe('Remove this friend? (🦊 fox, last online 2h ago, another friend has the same name)')
+  expect(qa).not.toBe(qb)
+  for (const q of [qa, qb]) expect(q).not.toContain('Bob')
+  expect(w.sent.filter(x => x.path === '/kick')).toEqual([])
+})
+
+// 審查 M2：同名、沒選頭像、同狀態——預設情況也要分得出（底色不同）；真的一模一樣就照實說
+test('ui-16：同名又都沒選頭像 → 確認框用底色分辨；描述真的相同就明說分不出（盲審 #4 複看）', async () => {
+  const mk = (id: string, presence: 'working' | 'idle' | 'offline' = 'idle') => friendsFrom([{ ...BOB_ROW, id, presence, seenAgoSec: 7200 }])[0]!
+  const ids = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10']
+  const roster = ids.map(id => mk(id))
+  const texts = roster.map(f => removeWho(f, roster, 'en'))
+  expect(texts.some(x => /(blue|purple|green|orange|pink|brown) badge/.test(x)), '有說底色').toBe(true)
+  expect(new Set(texts).size, '底色讓描述不全相同').toBeGreaterThan(1)
+  expect(removeWho(roster[0]!, roster, 'zh-TW')).toMatch(/頭像/)
+  for (const x of texts) expect(x).not.toContain('Bob')
+  const a = mk('same-a', 'offline'), b = mk('same-b', 'offline')
+  expect(removeWho(a, [a, b], 'en')).toBe('last online 2h ago, another friend has the same name, looks the same as another friend here, so check the row you pressed')
+  expect(removeWho(a, [a], 'en'), '沒有同名就不加註').toBe('last online 2h ago')
+})
+
+test('ui-16：終端機同名、都沒頭像、同狀態 → 確認框不說畫面上沒有的底色，並提醒看起來一樣（盲審 #4 複看）', async ($, on) => {
+  const twinA = { ...BOB_ROW, id: 'f1', presence: 'idle' }
+  const twinB = { ...BOB_ROW, id: 'f2', presence: 'idle' }
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, twinA, twinB], ask: STRINGS.en.removeNo })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  const ui = await mountPane($, 'terminal')
+  await ui.press({ key: 'remove-term-f1' })
+  await w.clock.settle()
+  await ui.unmount()
+  expect(w.asked.at(-1)?.question).toBe('Remove this friend? (Idle, another friend has the same name, ' + STRINGS.en.askRemoveLookAlike + ')')
+  expect(w.asked.at(-1)?.question).not.toContain('badge')
+})
+
+test('ui-16：同名時按第二位確認 → 只踢那一位的 memberId；繁中確認框也不含名字（盲審 #4）', async ($, on) => {
+  const twinA = { ...BOB_ROW, id: 'f1', avatar: 'cat' }
+  const twinB = { ...BOB_ROW, id: 'f2', avatar: 'fox', presence: 'idle' }
+  const w = world(on, { store: { membership: MEMBERSHIP, lang: 'zh-TW' }, friends: [ME_ROW, twinA, twinB], ask: STRINGS['zh-TW'].removeYes })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  const ui = await mountPane($, 'desktop')
+  await ui.press({ key: 'remove-f2' })
+  await w.clock.settle()
+  await ui.unmount()
+  expect(w.asked.at(-1)?.question).toBe(`確定移除這位朋友？（🦊 ${STRINGS['zh-TW'].avatarName.fox}，閒置，另有 1 位朋友同名）`)
+  expect(w.sent.filter(x => x.path === '/kick').map(x => x.body)).toEqual([{ memberId: 'f2' }])
+})
+
+test('ui-16：回應遺失 → 固定不確定句，不承諾資料沒變', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW], ask: STRINGS.en.removeYes, fetchFailAfter: { '/kick': new Error('response lost') } })
+  await start($)
+  const r = await run($, 'remove Bob')
+  expect(r.text).toBe(STRINGS.en.removeUncertain)
+  expect(r.text ?? '').not.toContain('Bob')
+})
+
+test('ui-16：中繼成功後 membership store.set 失敗 → 固定不確定句', async ($, on) => {
+  const w = world(on, {
+    store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW], ask: STRINGS.en.removeYes,
+    storeSetFail: (key, value) => key === 'membership' && (value as any)?.inviteGeneration === 1 ? new Error('disk full') : undefined,
+  })
+  await start($)
+  expect((await run($, 'remove Bob')).text).toBe(STRINGS.en.removeUncertain)
+  expect(w.shared.membership).toEqual(MEMBERSHIP)
+})
+
+test('ui-16：中繼成功後 crash checkpoint → 結構化 outcome 是 uncertain', async ($, on) => {
+  world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW] })
+  await start($)
+  const outcome = await removeMember($ as any, MEMBERSHIP, 'f1', async () => { throw new Error('simulated crash boundary') })
+  expect(outcome).toBe('uncertain')
+})
+
+test('ui-16：原群主離開後，簽章 self row 讓接任者取得群主權限，remove／rotate 都成功', async ($, on) => {
+  const successor = { ...MEMBERSHIP, isOwner: false }
+  const w = world(on, {
+    store: { membership: successor }, friends: [ME_ROW, BOB_ROW], ask: STRINGS.en.removeYes,
+    reply: { '/invite/rotate': { invite: 'g1-afterrotate', inviteGeneration: 2 } },
+  })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect(w.shared.membership).toMatchObject({ isOwner: true })
+  expect((await run($, 'remove Bob')).text).toBe(STRINGS.en.removedOne)
+  expect((await run($, 'rotate')).text).toBe(STRINGS.en.rotated)
+})
+
+for (const surface of SURFACES) {
+  test(`ui-16：${surface} 實際按移除入口，以 memberId 精確移除`, async ($, on) => {
+    const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW], ask: STRINGS.en.removeYes })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    const ui = await mountPane($, surface)
+    const key = surface === 'terminal' ? 'remove-term-f1' : 'remove-f1'
+    expect(await ui.find({ type: 'Button', key }), `${surface} 移除入口`).toBeDefined()
+    await ui.press({ key })
+    await ui.unmount()
+    await w.clock.settle()
+    expect(w.sent.filter(x => x.path === '/kick').at(-1)?.body).toEqual({ memberId: 'f1' })
+    expect(w.toasts.at(-1)).toBe(STRINGS.en.removedOne)
+  })
+}
+
+// ---- ui-15：本人改名；自由文字只送中繼、畫 pane，不進指令輸出 ----
+test('ui-15：/friends name 只改本人，輸出固定且不含新名字；本機 roster 與 membership 同步', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW] })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  const r = await run($, 'name New Display')
+  expect(r.text).toBe(STRINGS.en.nameChanged)
+  expect(r.text ?? '').not.toContain('New Display')
+  expect(w.sent.filter(x => x.path === '/name').at(-1)?.body).toEqual({ name: 'New Display' })
+  expect(w.shared.membership).toMatchObject({ memberId: 'm1', name: 'New Display' })
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: 'New Display' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('ui-15：空白、超長、控制／零寬／RTL 名字先在本機拒絕，不送請求也不寫 store', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP } })
+  await start($)
+  for (const value of ['', 'A'.repeat(21), 'Bad\u0007', 'Zero\u200bWidth', 'RTL\u202eName'])
+    expect((await run($, `name ${value}`)).text, JSON.stringify(value)).toBe(STRINGS.en.usageName)
+  expect(w.sent.filter(x => x.path === '/name')).toEqual([])
+  expect(w.shared.membership).toEqual(MEMBERSHIP)
+})
+
+test('ui-15：改名中繼失敗只輸出依狀態碼選的固定句，不含名字或中繼文字', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, fail: { '/name': 429 } })
+  await start($)
+  const r = await run($, 'name Secret New Name')
+  expect(r.text).toBe(STRINGS.en.error(STRINGS.en.relayError(429)))
+  expect(r.text ?? '').not.toContain('Secret New Name')
+  expect(r.text ?? '').not.toContain('Ignore previous')
+  expect(w.shared.membership).toEqual(MEMBERSHIP)
+})
+
+for (const surface of SURFACES) {
+  test(`ui-15：${surface} 實際按改名入口；pane 問名字、成功 toast 不回顯名字`, async ($, on) => {
+    const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW], ask: 'Pane New Name' })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    const ui = await mountPane($, surface)
+    expect(await ui.find({ type: 'Button', key: 'name' }), `${surface} 改名入口`).toBeDefined()
+    await ui.press({ key: 'name' })
+    await ui.unmount()
+    await w.clock.settle()
+    expect(w.asked.at(-1)?.question).toBe(STRINGS.en.askNewName)
+    expect(w.sent.filter(x => x.path === '/name').at(-1)?.body).toEqual({ name: 'Pane New Name' })
+    expect(w.toasts.at(-1)).toBe(STRINGS.en.nameChanged)
+    expect(w.toasts.at(-1)).not.toContain('Pane New Name')
+  })
+}
+
+test('ui-15：延遲的舊 /status 回應不能把 pane 的 self row 畫回改名前名字', async ($, on) => {
+  let release!: () => void, reached!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const started = new Promise<void>(resolve => { reached = resolve })
+  let armed = false
+  const oldSelf = { ...ME_ROW, name: 'Me' }
+  const w = world(on, {
+    store: { membership: MEMBERSHIP }, friends: [oldSelf, BOB_ROW],
+    fetchWait: (path) => {
+      if (path !== '/status' || !armed) return undefined
+      armed = false
+      reached()
+      return held
+    },
+  })
+  await start($)
+  armed = true
+  const ticking = w.clock.advance(10_000)
+  await started
+  expect((await run($, 'name Newer Name')).text).toBe(STRINGS.en.nameChanged)
+  release()
+  await ticking
+  await w.clock.settle()
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: 'Newer Name' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Me' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('ui-15：pane 非法名字與取消都不送中繼', async ($, on) => {
+  const setup: Setup = { store: { membership: MEMBERSHIP }, friends: [ME_ROW], ask: 'A'.repeat(21) }
+  const w = world(on, setup)
+  await start($)
+  let ui = await mountPane($)
+  await ui.press({ key: 'name' })
+  await ui.unmount()
+  await w.clock.settle()
+  expect(w.toasts.at(-1)).toBe(STRINGS.en.nameInvalid)
+  setup.ask = STRINGS.en.cancelName
+  ui = await mountPane($)
+  await ui.press({ key: 'name' })
+  await ui.unmount()
+  await w.clock.settle()
+  expect(w.toasts.at(-1)).toBe(STRINGS.en.nameCancelled)
+  expect(w.sent.filter(x => x.path === '/name')).toEqual([])
+})
 
 test('指令 create：沒給名字只回用法；給了就建群組、存成員資料、打開 pane（ui-2）', async ($, on) => {
   const w = world(on)
@@ -2981,19 +3445,69 @@ test('問名字：選「先不加入」或空白就不加入；選「匿名」�
   await w.clock.advance(1_000)
 })
 
-test('裝好後第一次開對話：自動打開 pane（帶 focus）讓人貼邀請，只跳一次；已加入的照舊打開、不搶 focus', async ($, on) => {
+test('開對話：還沒加入群組就自動打開 pane（帶 focus）讓人貼邀請，每次都跳（R6-01）；已加入的照舊打開、不搶 focus', async ($, on) => {
   const w = world(on)
   await start($)
   expect(w.opened).toHaveLength(1)
   expect(w.opened[0]).toMatchObject({ id: 'friends', focus: true })
   expect(w.shared.onboarded).toBe(true)
   await start($)
-  expect(w.opened).toHaveLength(1)
+  expect(w.opened).toHaveLength(2)
+  expect(w.opened[1]).toMatchObject({ id: 'friends', focus: true })
   w.shared.membership = MEMBERSHIP
   await start($)
-  expect(w.opened).toHaveLength(2)
-  expect(w.opened[1].focus).toBeUndefined()
+  expect(w.opened).toHaveLength(3)
+  expect(w.opened[2].focus).toBeUndefined()
   await w.clock.advance(1_000)
+})
+
+test('R6-01：onboarded 已經是 true、還是沒加入 → 開新對話照樣自動打開 pane（帶 focus）', async ($, on) => {
+  const w = world(on, { store: { onboarded: true } })
+  await start($)
+  expect(w.opened).toHaveLength(1)
+  expect(w.opened[0]).toMatchObject({ id: 'friends', focus: true })
+  await w.clock.advance(1_000)
+})
+
+test('R6-01：已加入群組 → 開新對話的打開方式與以前完全一樣（不帶 focus、不寫 onboarded）', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW] })
+  await start($)
+  expect(w.opened).toHaveLength(1)
+  expect(w.opened[0].focus).toBeUndefined()
+  expect(w.shared.onboarded).toBeUndefined()
+  await w.clock.advance(1_000)
+})
+
+test('R6-01：沒加入的畫面三種介面、中英都有 reopenHint 一行；已加入的畫面沒有', async ($, on) => {
+  const w = world(on)
+  await start($)
+  for (const lang of ['en', 'zh-TW'] as const) {
+    await run($, `lang ${lang}`)
+    for (const surface of SURFACES) {
+      const ui = await mountPane($, surface)
+      expect(await ui.find({ type: 'Text', text: STRINGS[lang].reopenHint }), `${lang} ${surface} 沒加入有 reopenHint`).toBeDefined()
+      await ui.unmount()
+    }
+  }
+  w.shared.membership = MEMBERSHIP
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  for (const lang of ['en', 'zh-TW'] as const) {
+    await run($, `lang ${lang}`)
+    for (const surface of SURFACES) {
+      const ui = await mountPane($, surface)
+      expect(await ui.find({ type: 'Text', text: STRINGS[lang].reopenHint }), `${lang} ${surface} 已加入沒有 reopenHint`).toBeUndefined()
+      await ui.unmount()
+    }
+  }
+})
+
+test('R6-01：reopenHint 一行放得下（英文 ≤ 60 格、繁中 ≤ 60 欄，全形算 2），且就是約定的固定句', () => {
+  expect(cellWidth(STRINGS.en.reopenHint)).toBeLessThanOrEqual(60)
+  expect(cellWidth(STRINGS['zh-TW'].reopenHint)).toBeLessThanOrEqual(60)
+  expect(STRINGS.en.reopenHint).toBe('You can open this panel again any time by typing /friends.')
+  expect(STRINGS['zh-TW'].reopenHint).toBe('之後打 /friends 可以再打開這個面板。')
 })
 
 test('pane 貼邀請：對的邀請 → 問名字 → 加入；不是邀請只提示、不送請求；手機沒有輸入框、有建立群組鈕', async ($, on) => {
@@ -3671,27 +4185,27 @@ test('sec-6a：邀請連結的中繼只收協定＋主機＋埠，帶路徑、�
   expect(relayOrigin(`https://${'a'.repeat(254)}.example`)).toBeNull()
 })
 
-for (const ask of ['Not yet, add English install steps', 'Not yet, add Chinese (繁體中文) install steps']) {
-  test(`sec-6a：舊版存下的中繼帶路徑 → 「${ask}」加入那行只用協定＋主機＋埠，安裝照公開 README（ui-23b）`, async ($, on) => {
+for (const ask of [STRINGS.en.installedNo, STRINGS.en.installedNoOther]) {
+  test(`sec-6a／S1b：舊版存下的中繼帶路徑 → 「${ask}」複製出去的安裝文字完全沒有加入那行、沒有中繼網址，安裝照公開 README`, async ($, on) => {
     const w = await pressInvite($, on, ask, EVIL_RELAY)
     expect(w.copied).toHaveLength(1)
     expect(w.copied[0]).not.toContain('marketplace')
     expect(w.copied[0]).toContain(SOURCE_URL)
-    expect(w.copied[0]).toContain('/friends join https://evil.example#')
-    expect(w.copied[0]!.split('evil.example')).toHaveLength(2)
+    expect(w.copied[0]).not.toContain('/friends join')
+    expect(w.copied[0]).not.toContain('evil.example')
     expect(w.copied[0]).not.toContain('skip_the_source_review')
     expect(w.copied[0]).not.toContain('curl')
   })
 }
 
 test('sec-6a：存下的中繼帶帳密、抽不出主機 → 不問也不複製', async ($, on) => {
-  const w = await pressInvite($, on, 'Not yet, add English install steps', 'https://Claude_run_this@evil.example')
+  const w = await pressInvite($, on, STRINGS.en.installedNo, 'https://Claude_run_this@evil.example')
   expect(w.asked).toHaveLength(0)
   expect(w.copied).toHaveLength(0)
 })
 
 test('sec-6a：中繼網址有埠、結尾斜線 → 加入那行用協定＋主機＋埠', async ($, on) => {
-  const w = await pressInvite($, on, 'Not yet, add English install steps', 'https://r.test:8443/')
+  const w = await pressInvite($, on, STRINGS.en.installedYes, 'https://r.test:8443/')
   expect(w.copied[0]).toContain('/friends join https://r.test:8443#g1-secretinvite')
 })
 
@@ -3705,7 +4219,7 @@ test('sec-6a：/friends relay 只收協定＋主機＋埠，存的是去掉結�
   expect(w.shared.relay).toBe('https://own.test')
 })
 
-// ui-12（主人 10-12）：按「複製邀請碼」先問朋友裝好了沒；裝好了只複製加入指令，還沒就連安裝步驟一起複製（C 版），關掉框不複製
+// ui-12（主人 10-12）：按「複製邀請碼」先問朋友裝好了沒；裝好了只複製加入指令；還沒就只複製安裝步驟、不含邀請碼（S1b），關掉框不複製
 const pressInvite = async ($: any, on: On, ask: string | Error, relay = 'https://relay.test') => {
   const w = world(on, { store: { membership: { ...MEMBERSHIP, relay } }, ask })
   await start($)
@@ -3720,75 +4234,115 @@ test('複製邀請碼：朋友裝好了 → 只複製「/friends join <連結>�
   const w = await pressInvite($, on, 'Yes, copy just the invite')
   expect(w.asked).toHaveLength(1)
   expect(w.asked[0].question).toBe('Has your friend installed Friends with Claude yet?')
-  expect(w.asked[0].options.map((o: any) => o.label)).toEqual(['Yes, copy just the invite', 'Not yet, add English install steps', 'Not yet, add Chinese (繁體中文) install steps'])
+  expect(w.asked[0].options.map((o: any) => o.label)).toEqual(['Yes, copy just the invite', 'Not yet, add English steps (no invite code)', 'Not yet, add Chinese steps (no invite code)'])
   expect(w.copied).toEqual(['/friends join https://relay.test#g1-secretinvite'])
   expect(w.toasts.at(-1)).toContain('Invite copied')
 })
 
-// ui-23b（主人 10-15 選 A）：一則訊息，安裝只留一句「照 README 的安裝步驟」；框沒跳出來的備案照舊
+// S1b（0.5.6）：「還沒裝」複製出去的訊息完全不含邀請碼——只有安裝步驟；加入那一行等朋友裝好後，邀請人再按一次選「裝好了」單獨傳
 const exactly = (text: string) => new RegExp('^' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')
-const INVITE_A = {
+const INSTALL_ONLY = {
   en: [
-    "Hi! I'm using a Claude Code plugin called Friends with Claude — we can see whether each other is online and what kind of work we're doing (never the conversation itself).",
-    '1. In a local Claude Code conversation on your computer (not a cloud session), send Claude this:',
+    "Hi! I'm using a Claude Code plugin called Friends with Claude — we can see whether each other is online",
+    "and what kind of work we're doing (never the conversation itself).",
+    '1. In a local Claude Code conversation on your computer (not a cloud session), send Claude only this line:',
     '   Please install the Claude Code plugin Friends with Claude by following the install steps in the README at https://github.com/yanneko27450/with-friends',
-    '2. When the Friends with Claude pane opens, paste this line into it (not into the chat). If no pane opens, start a new conversation and send only this line:',
-    '   /friends join https://relay.test#g1-secretinvite',
-    "This invite is just for you, please don't forward it.",
+    '2. Claude will explain the risks first and ask whether you want to install it;',
+    "just say yes if you're happy with that.",
+    "3. After it's installed, start a new conversation. A Friends with Claude pane opens on the right.",
+    "I'll send the join line in a separate message — paste that into the pane, not into the chat with Claude.",
+    'This message has no invite code in it.',
   ].join('\n'),
   'zh-TW': [
-    '嗨！我在用 Claude Code 外掛「Friends with Claude」，可以看到彼此在不在線、在忙哪一類事（不會看到對話內容）。',
-    '1. 在你電腦上的 Claude Code 開「本機」對話（不要選雲端），傳這句給 Claude：',
+    '嗨！我在用 Claude Code 外掛「Friends with Claude」，',
+    '可以看到彼此在不在線、在忙哪一類事（不會看到對話內容）。',
+    '1. 在你電腦上的 Claude Code 開「本機」對話（不要選雲端），只把下面這一句傳給 Claude：',
     '   請照 https://github.com/yanneko27450/with-friends 的 README 裡的安裝步驟，幫我安裝 Claude Code 外掛 Friends with Claude',
-    '2. 右邊跳出 Friends with Claude 的框之後，把這一行貼進框裡（不是貼進對話）。沒跳出來的話，開一個新對話、只傳這一行：',
-    '   /friends join https://relay.test#g1-secretinvite',
-    '邀請碼只給你，請不要轉傳。',
+    '2. Claude 會先說明風險、問你要不要裝，同意就好。',
+    '3. 裝好後開一個新對話，右邊會跳出 Friends with Claude 的框。',
+    '我會另外再傳「加入那一行」給你，請貼進那個框，不是貼進跟 Claude 的對話。',
+    '這則訊息裡沒有邀請碼。',
   ].join('\n'),
 }
+/** 邀請碼樣子的東西：join 指令、# 之後的字、真的邀請碼、中繼網址、群組代碼樣子（g1-xxxx／g1.xxxx） */
+const hasInviteShape = (text: string) => /\/friends join|#|secretinvite|relay\.test|workers\.dev|friends-status-relay|\bg[0-9a-z]*[.-][A-Za-z0-9_-]{6,}/.test(text)
 
-test('複製邀請碼：朋友還沒裝 → A 全文（一則訊息、安裝照 README、加入那行單獨一行、不要轉傳）（ui-23b）', async ($, on) => {
-  const w = await pressInvite($, on, 'Not yet, add English install steps')
+test('複製邀請碼：朋友還沒裝 → 只複製安裝步驟（英文），完全沒有邀請碼樣子的字（S1b）', async ($, on) => {
+  const w = await pressInvite($, on, STRINGS.en.installedNo)
   expect(w.copied).toHaveLength(1)
-  expect(w.copied[0]).toMatch(exactly(INVITE_A.en))
-  expect(w.toasts.at(-1)).toContain('install steps copied')
+  expect(w.copied[0]).toMatch(exactly(INSTALL_ONLY.en))
+  expect(hasInviteShape(w.copied[0]!)).toBe(false)
+  expect(w.toasts.at(-1)).toBe(STRINGS.en.copiedInstallOnly)
 })
 
-test('邀請文字 A：中英全文、邀請碼只在加入那一行、長度上限、不連錨點（ui-23b）', async () => {
+test('安裝文字 S1b：中英全文、沒有參數（是字串不是函式）、沒有邀請碼樣子、只有一個網址、行數與長度上限', async () => {
   for (const lang of ['en', 'zh-TW'] as const) {
-    const text = STRINGS[lang].inviteMessage('/friends join https://relay.test#g1-secretinvite')
-    expect(text, lang).toMatch(exactly(INVITE_A[lang]))
-    const lines = text.split('\n')
-    expect(lines.filter(l => l.includes('secretinvite')), `${lang} 邀請碼只在一行`).toEqual(['   /friends join https://relay.test#g1-secretinvite'])
-    // 整行貼進 pane 也收
-    expect(parseInvite(lines.find(l => l.includes('/friends join'))!.trim(), 'http://x'), lang).toEqual({ relay: 'https://relay.test', invite: 'g1-secretinvite' })
-    expect(lines.findIndex(l => l.includes('/friends join')), `${lang} 加入在安裝之後`).toBeGreaterThan(lines.findIndex(l => l.includes(SOURCE_URL)))
+    const text = STRINGS[lang].installMessage
+    expect(typeof text, `${lang} 固定字串，結構上放不進邀請碼`).toBe('string')
+    expect(text, lang).toMatch(exactly(INSTALL_ONLY[lang]))
+    expect(hasInviteShape(text), `${lang} 沒有邀請碼樣子`).toBe(false)
+    expect(text.match(/https?:\/\/\S+/g), `${lang} 只有安裝句裡的 README 網址`).toEqual([SOURCE_URL])
     expect(text, `${lang} 連 repo、不連錨點`).not.toContain(SOURCE_URL + '#')
-    expect(text, `${lang} 不再帶安裝指令`).not.toMatch(/claude plugin|marketplace|\/plugin /)
-    // ui-23a 算的：英約 674、中約 348 字元；留一點餘裕，變長就要重新評估
-    expect(text.length, `${lang} 長度`).toBeLessThanOrEqual(lang === 'en' ? 700 : 380)
+    expect(text, `${lang} 不帶安裝指令`).not.toMatch(/claude plugin|marketplace|\/plugin /)
+    expect(text, lang).not.toMatch(/[<>`]/)
+    const lines = text.split('\n')
+    expect(lines.length, `${lang} 行數`).toBeLessThanOrEqual(9)
+    // 英文數字元（安裝句那一行含網址，卡片 P2 一字不改所以不計）；繁中數「全形字」＝顯示寬度的一半
+    for (const line of lines) if (!line.includes(SOURCE_URL)) expect(lang === 'en' ? line.length : cellWidth(line) / 2, `${lang} 每行長度：${line}`).toBeLessThanOrEqual(lang === 'en' ? 110 : 50)
+    const size = (x: string) => (lang === 'en' ? x.length : cellWidth(x) / 2)
+    expect(size(STRINGS[lang].copiedInstallOnly), `${lang} toast`).toBeLessThanOrEqual(lang === 'en' ? 90 : 40)
+    expect(size(STRINGS[lang].installedNo), lang).toBeLessThanOrEqual(lang === 'en' ? 45 : 22)
+    expect(size(STRINGS[lang].installedNoOther), lang).toBeLessThanOrEqual(lang === 'en' ? 45 : 22)
   }
 })
 
-// ui-21（主人 10-12 選「複製時多一個選項」）：安裝步驟可以用另一個語言，不用先切介面；加入那一行兩種都一樣
-test('複製邀請碼：英文介面選「附中文安裝步驟」→ 中文訊息、提示仍是英文（ui-21）', async ($, on) => {
-  const w = await pressInvite($, on, 'Not yet, add Chinese (繁體中文) install steps')
-  expect(w.copied).toHaveLength(1)
-  const text = w.copied[0]!
-  expect(text).toMatch(exactly(INVITE_A['zh-TW']))
-  expect(w.toasts.at(-1)).toBe(STRINGS.en.copiedWithSteps)
+test('S1b 固定承諾句：風險說明、邀請碼的去向、沒有邀請碼，中英各自逐字在裡面；toast 兩件事都說到', async () => {
+  expect(STRINGS.en.installMessage).toContain("I'll send the join line in a separate message — paste that into the pane, not into the chat with Claude.")
+  expect(STRINGS.en.installMessage).toContain('This message has no invite code in it.')
+  expect(STRINGS.en.installMessage).toContain("Claude will explain the risks first and ask whether you want to install it;\njust say yes if you're happy with that.")
+  expect(STRINGS['zh-TW'].installMessage).toContain('我會另外再傳「加入那一行」給你，請貼進那個框，不是貼進跟 Claude 的對話。')
+  expect(STRINGS['zh-TW'].installMessage).toContain('這則訊息裡沒有邀請碼。')
+  expect(STRINGS['zh-TW'].installMessage).toContain('Claude 會先說明風險、問你要不要裝，同意就好。')
+  expect(STRINGS.en.copiedInstallOnly).toMatch(/no invite code/)
+  expect(STRINGS.en.copiedInstallOnly).toMatch(/copy invite again.*Yes/)
+  expect(STRINGS['zh-TW'].copiedInstallOnly).toContain('不含邀請碼')
+  expect(STRINGS['zh-TW'].copiedInstallOnly).toContain('再複製一次邀請碼，選「裝好了」')
 })
 
-test('複製邀請碼：中文介面三個選項都是中文；選「附英文安裝步驟」→ 英文訊息（ui-21）', async ($, on) => {
-  const w = world(on, { store: { membership: { ...MEMBERSHIP, relay: 'https://relay.test' }, lang: 'zh-TW' }, ask: '還沒，附英文安裝步驟（給看英文的朋友）' })
+// ui-21（主人 10-12 選「複製時多一個選項」）：安裝步驟可以用另一個語言，不用先切介面
+test('複製邀請碼：英文介面選「附中文安裝步驟」→ 中文安裝文字、提示仍是英文、沒有邀請碼（ui-21、S1b）', async ($, on) => {
+  const w = await pressInvite($, on, STRINGS.en.installedNoOther)
+  expect(w.copied).toHaveLength(1)
+  expect(w.copied[0]).toMatch(exactly(INSTALL_ONLY['zh-TW']))
+  expect(hasInviteShape(w.copied[0]!)).toBe(false)
+  expect(w.toasts.at(-1)).toBe(STRINGS.en.copiedInstallOnly)
+})
+
+test('複製邀請碼：中文介面三個選項都是中文；選「附英文安裝步驟」→ 英文安裝文字、沒有邀請碼（ui-21、S1b）', async ($, on) => {
+  const w = world(on, { store: { membership: { ...MEMBERSHIP, relay: 'https://relay.test' }, lang: 'zh-TW' }, ask: STRINGS['zh-TW'].installedNoOther })
   await start($)
   await w.clock.advance(10_000)
   const ui = await $.ui.mount({ plugin: 'with-friends', surface: 'desktop', component: 'Pane', requestId: 'friends', props: PANE_PROPS })
   await ui.press({ key: 'invite' })
   await ui.unmount()
   expect(w.asked[0].question).toBe('你的朋友裝好「Friends with Claude」了嗎？')
-  expect(w.asked[0].options.map((o: any) => o.label)).toEqual(['裝好了，只複製邀請', '還沒，附中文安裝步驟', '還沒，附英文安裝步驟（給看英文的朋友）'])
-  expect(w.copied).toEqual([INVITE_A.en])
-  expect(w.toasts.at(-1)).toBe(STRINGS['zh-TW'].copiedWithSteps)
+  expect(w.asked[0].options.map((o: any) => o.label)).toEqual(['裝好了，只複製邀請', '還沒，附中文安裝步驟（不含邀請碼）', '還沒，附英文安裝步驟（不含邀請碼）'])
+  expect(w.copied).toEqual([INSTALL_ONLY.en])
+  expect(w.toasts.at(-1)).toBe(STRINGS['zh-TW'].copiedInstallOnly)
+})
+
+test('複製邀請碼：兩則分開傳——「還沒裝」的複製沒有邀請碼，再按一次選「裝好了」才複製加入那一行（S1b）', async ($, on) => {
+  const w = world(on, { store: { membership: { ...MEMBERSHIP, relay: 'https://relay.test' } }, asks: [STRINGS.en.installedNo, STRINGS.en.installedYes] })
+  await start($)
+  await w.clock.advance(10_000)
+  const ui = await $.ui.mount({ plugin: 'with-friends', surface: 'desktop', component: 'Pane', requestId: 'friends', props: PANE_PROPS })
+  await ui.press({ key: 'invite' })
+  await w.clock.settle()
+  expect(w.copied).toEqual([INSTALL_ONLY.en])
+  await ui.press({ key: 'invite' })
+  await w.clock.settle()
+  await ui.unmount()
+  expect(w.copied).toEqual([INSTALL_ONLY.en, '/friends join https://relay.test#g1-secretinvite'])
 })
 
 // ---- ui-21：新裝的人第一次看到的語言（主人 10-12 選「自動判斷」）----
@@ -3978,6 +4532,27 @@ test('名字清理：零寬字元、方向字元、U+061C、C1 控制字元都�
   // 只有看不見的字＝沒給名字
   expect((await run($, 'create \u200b\u200f')).text).toBe('Usage: /friends create <your name>')
   await w.clock.advance(1_000)
+})
+
+// 0.5.6 盲審 #5：看起來是空白的填充字元（U+3164 等）原本擋不掉，可以做出「看不見的名字」或讓兩個人看起來同名
+test('名字清理：填充字元（U+3164／FFA0／115F／1160／2800／034F／17B4／17B5／180B／FFFC／Tag）清掉，整個名字只剩這些＝空（盲審 #5）', async () => {
+  for (const ch of ['\u3164', '\uffa0', '\u115f', '\u1160', '\u2800', '\u034f', '\u17b4', '\u17b5', '\u180b', '\u180d', '\u180f', '\ufffc', '\u{e0041}', '\u{1d159}']) {
+    const label = 'U+' + ch.codePointAt(0)!.toString(16).toUpperCase()
+    expect(cleanName(ch, 20), label + ' 單獨').toBe('')
+    expect(cleanName(ch.repeat(5), 20), label + ' 重複').toBe('')
+    expect(cleanName('A' + ch + 'B', 20), label + ' 夾在中間').toBe('AB')
+    expect(isValidNameInput(ch, 20), label + ' 改名檢查').toBe(false)
+    expect(isValidNameInput('Bob' + ch, 20), label + ' 接在名字後').toBe(false)
+  }
+  expect(isValidNameInput('王小明', 20)).toBe(true)
+  // 審查 M1：整個名字只剩變體選擇符、組合符號、樂譜／格式控制字元，一樣算空名字；正常的 emoji、IVS 漢字、組合字不受影響
+  for (const only of ['\ufe0f\ufe0f', '\ufe00', '\u{e0100}', '\u0301\u0301', '\u{1d173}', '\u{13430}', '\u200d\ufe0f']) {
+    expect(cleanName(only, 20), JSON.stringify(only)).toBe('')
+    expect(isValidNameInput(only, 20), JSON.stringify(only)).toBe(false)
+  }
+  for (const ok of ['❤\ufe0f', '1\ufe0f\u20e3', '葛\u{e0100}', 'e\u0301', '👍🏽', 'Bob']) expect(cleanName(ok, 20), JSON.stringify(ok)).toBe(ok)
+  expect(cleanName('A\u{e0100}B\u3164', 20)).toBe('A\u{e0100}B')
+  expect(cleanName('😀👍🏽', 20)).toBe('😀👍🏽')
 })
 
 test('名字清理：中繼送來的好友名字畫在 pane 前也清（舊版或別人架的中繼）（ui-18 F）', async ($, on) => {
@@ -4696,9 +5271,12 @@ const perMinute = (w: any, from: number, minutes: number) => {
   return { requests: reqs.length / minutes, statuses: reqs.filter((r: any) => r.path === '/status').length / minutes, withActivity: reqs.filter((r: any) => r.body?.action !== undefined).length }
 }
 test('perf-3：pane 沒開的對話，狀態沒變的 10 分鐘：每分鐘 1 次心跳、不寫 $.store，不比開著勤', async ($, on) => {
-  // 測試工具不能觸發 ui.close：改成開對話時還沒加入（pane 不會自己打開），之後別的對話加入了群組（store 裡多了 membership）
-  const w = world(on, { store: { onboarded: true }, friends: PERF3_FRIENDS })
+  // 測試工具不能觸發 ui.close：R6-01 起沒加入的對話每次都會自己打開 pane，所以開了就按「之後再說」關掉，之後別的對話加入了群組（store 裡多了 membership）
+  const w = world(on, { friends: PERF3_FRIENDS })
   await start($)
+  const pane = await mountPane($)
+  await pane.press({ key: 'later' })
+  await pane.unmount()
   w.shared.membership = MEMBERSHIP
   await w.clock.advance(70_000)
   await w.clock.settle()
@@ -5291,31 +5869,32 @@ test('ui-29i：挑版本的寫入還沒回來時移焦點 → 不會留下提早
   await w.clock.advance(1_000)
 })
 
-// rel-054p：升到 0.5.4 的外掛：版本紀錄預設開在 0.5.4、舊版本都挑得到；中英條目數 3～5、一樣多、不帶卡號
-test('rel-054p：0.5.4 的版本紀錄——預設 0.5.4、可以挑舊版本；條目給一般使用者看', async ($, on) => {
+// rel-056p：升到 0.5.6 的外掛：版本紀錄預設開在 0.5.6、舊版本都挑得到；中英條目數 3～5、一樣多、不帶卡號。
+// 日期已填 2026-10-30，部署當天換成真的（changelog.ts、CHANGELOG.md、這裡三處一起換）
+test('rel-056p：0.5.6 的版本紀錄——預設 0.5.6、可以挑舊版本；條目給一般使用者看', async ($, on) => {
   const top = CHANGELOG[0]!
-  expect(top.version).toBe('0.5.4')
+  expect(top.version).toBe('0.5.6')
   for (const lang of ['en', 'zh-TW'] as const) {
     expect(top.items[lang].length, lang).toBeGreaterThanOrEqual(3)
     expect(top.items[lang].length, lang).toBeLessThanOrEqual(5)
     for (const item of top.items[lang]) expect(item, `${lang} 不放卡號`).not.toMatch(/\b(?:ui|sec|fix|ver|rel|dsn|L)-\d/)
   }
   expect(top.items.en.length, '中英一樣多').toBe(top.items['zh-TW'].length)
-  const w = world(on, { version: '0.5.4', store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW] })
+  const w = world(on, { version: '0.5.6', store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW] })
   await start($)
   await w.clock.advance(10_000)
   const ui = await mountPane($)
   await ui.press({ key: 'whatsnew' })
   await w.clock.settle()
-  expect(await currentHeading(ui)).toBe('v0.5.4 · 2026-10-23')
+  expect(await currentHeading(ui)).toBe('v0.5.6 · 2026-10-30')
   expect(await ui.find({ type: 'Button', key: 'whatsnew-older' }), '可以往舊的挑').toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Relay replies are now verified/ }), '0.5.4 的條目').toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Only the group owner can remove a friend/ }), '0.5.6 的條目').toBeDefined()
   await ui.unmount()
   await w.clock.advance(WHATS_NEW_MS + 1_000)
 })
 
-test('rel-054p：手機上 0.5.4 的版本紀錄——挑到 0.5.2 時「較舊」「較新」兩顆都在', async ($, on) => {
-  const w = world(on, { version: '0.5.4', store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW] })
+test('rel-056p：手機上 0.5.6 的版本紀錄——挑到 0.5.4 時「較舊」「較新」兩顆都在', async ($, on) => {
+  const w = world(on, { version: '0.5.6', store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW] })
   await start($)
   await w.clock.advance(10_000)
   const ui = await mountPane($, 'mobile')
@@ -5324,12 +5903,12 @@ test('rel-054p：手機上 0.5.4 的版本紀錄——挑到 0.5.2 時「較舊�
   expect(await ui.find({ type: 'Button', key: 'whatsnew-newer' }), '最新的那版沒有「較新」').toBeUndefined()
   await ui.press({ key: 'whatsnew-older' })
   await w.clock.settle()
-  expect(await ui.find({ type: 'Text', text: 'v0.5.2 · 2026-10-20' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'v0.5.4 · 2026-10-23' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'whatsnew-older' }), '中間：有較舊').toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'whatsnew-newer' }), '中間：有較新').toBeDefined()
   await ui.press({ key: 'whatsnew-newer' })
   await w.clock.settle()
-  expect(await ui.find({ type: 'Text', text: 'v0.5.4 · 2026-10-23' }), '按較新回到 0.5.4').toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'v0.5.6 · 2026-10-30' }), '按較新回到 0.5.6').toBeDefined()
   await ui.unmount()
   await w.clock.advance(WHATS_NEW_MS + 1_000)
 })
@@ -5375,4 +5954,191 @@ test('ui-29i／ui-29j：焦點移到 ▶ 也重算 10 秒', async ($, on) => {
   expect(await isWhatsNewOpen(ui), '移焦點後 10 秒收起').toBe(false)
   await ui.unmount()
   await w.clock.advance(1_000)
+})
+
+// ---- ui-13：示範機器人只畫在本機面板；標「機器人」、不算進好友數、沒有移除鈕、人夠多就不畫 ----
+const BOT_NAME = { en: 'Robot (demo)', 'zh-TW': '機器人（示範）' } as const
+for (const lang of ['en', 'zh-TW'] as const) {
+  test(`ui-13：只有自己一人（${lang}）→ 三種介面都畫出標著機器人的示範好友；在線人數仍是 0、仍顯示只有你一人、機器人沒有移除鈕、不送中繼`, async ($, on) => {
+    const w = world(on, { store: { membership: MEMBERSHIP, lang }, friends: [ME_ROW] })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    for (const surface of SURFACES) {
+      const ui = await mountPane($, surface)
+      expect(await ui.find({ type: 'Text', text: BOT_NAME[lang] }), `${surface} 有示範機器人`).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: new RegExp(STRINGS[lang].online(0).replace(/[()]/g, '\$&')) }), `${surface} 在線人數不含機器人`).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: STRINGS[lang].alone }), `${surface} 仍顯示只有你一人`).toBeDefined()
+      expect(await ui.find({ type: 'Button', key: 'remove-demo-bot' }), surface).toBeUndefined()
+      expect(await ui.find({ type: 'Button', key: 'remove-term-demo-bot' }), surface).toBeUndefined()
+      expect(await ui.find({ type: 'Button', key: 'remove-off-demo-bot' }), surface).toBeUndefined()
+      await ui.unmount()
+    }
+    expect(JSON.stringify(w.sent), '機器人不經過中繼').not.toContain('demo-bot')
+  })
+}
+
+test('ui-13：/friends status 不把機器人算進在線人數（只看中繼回的名單）', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW] })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect((await run($, 'status')).text).toBe(statusText([ME_ROW as any], 'en', 'm1'))
+  expect(w.sent.length).toBeGreaterThan(0)
+})
+
+test('ui-13：群主且只有一位真朋友 → 機器人還在、沒有移除鈕，真朋友的移除鈕照舊', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, BOB_ROW] })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  for (const surface of SURFACES) {
+    const ui = await mountPane($, surface)
+    expect(await ui.find({ type: 'Text', text: BOT_NAME.en }), `${surface} 有機器人`).toBeDefined()
+    expect(await ui.find({ type: 'Button', key: surface === 'terminal' ? 'remove-term-f1' : 'remove-f1' }), `${surface} 真朋友有移除鈕`).toBeDefined()
+    expect(await ui.find({ type: 'Button', key: surface === 'terminal' ? 'remove-term-demo-bot' : 'remove-demo-bot' }), `${surface} 機器人沒有`).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('ui-13：真好友人數到 DEMO_BOT_SHOW_BELOW → 面板不畫機器人', async ($, on) => {
+  const many = Array.from({ length: DEMO_BOT_SHOW_BELOW }, (_, i) => ({ ...BOB_ROW, id: 'f' + (i + 1), name: 'Friend' + (i + 1) }))
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, ...many] })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  for (const surface of SURFACES) {
+    const ui = await mountPane($, surface)
+    expect(await ui.find({ type: 'Text', text: BOT_NAME.en }), `${surface} 不畫機器人`).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+// ---- R6-02：示範機器人標明「示範用」、獨立一塊（在離線框之後、「你」之前）、可以關掉 ----
+const demoKey = (surface: string) => (surface === 'terminal' ? 'hide-demo-term' : 'hide-demo-bot')
+for (const lang of ['en', 'zh-TW'] as const) {
+  test(`R6-02：只有自己一人（${lang}）→ 三種介面都有示範標示與隱藏鈕；不出現工作狀態字；在線人數仍是 0、仍顯示只有你一人`, async ($, on) => {
+    const w = world(on, { store: { membership: MEMBERSHIP, lang }, friends: [{ ...ME_ROW, presence: 'idle', action: '', subject: '' }] })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    for (const surface of SURFACES) {
+      const ui = await mountPane($, surface)
+      expect(await ui.find({ type: 'Text', text: BOT_NAME[lang] }), `${surface} 有名字`).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: STRINGS[lang].demoLabel }), `${surface} 有示範標示`).toBeDefined()
+      expect(await ui.find({ type: 'Button', key: demoKey(surface) }), `${surface} 有隱藏鈕`).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: STRINGS[lang].presence.working }), `${surface} 機器人沒有「工作中」`).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: new RegExp(STRINGS[lang].online(0).replace(/[()]/g, '\$&')) }), `${surface} 在線人數不含機器人`).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: STRINGS[lang].alone }), `${surface} 仍顯示只有你一人`).toBeDefined()
+      await ui.unmount()
+    }
+  })
+}
+
+test('R6-02：示範塊是獨立的（桌面／手機）：在好友清單與離線框之後、「你」那一塊之前，也不在好友清單裡', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW, off('f9', 'Dan', 999)] })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  for (const surface of ['desktop', 'mobile']) {
+    const ui = await mountPane($, surface)
+    const keys = childKeys(await ui.find({ type: 'Box' }))
+    expect(keys.indexOf('demo'), `${surface} 有示範塊`).toBeGreaterThan(-1)
+    expect(keys.indexOf('demo'), `${surface} 在離線框之後`).toBeGreaterThan(keys.indexOf('offline'))
+    expect(keys.indexOf('demo'), `${surface} 在「你」之前（你那塊之後只剩版本區塊）`).toBe(keys.indexOf('verblock') - 2)
+    expect(await ui.find({ type: 'Box', key: 'f-demo-bot' }), `${surface} 不在好友清單`).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+for (const lang of ['en', 'zh-TW'] as const) {
+  test(`R6-02：/friends demo off 回固定句、示範卡消失並存 demoHidden；demo on 回固定句、示範卡回來（${lang}）`, async ($, on) => {
+    const w = world(on, { store: { membership: MEMBERSHIP, lang }, friends: [ME_ROW] })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    expect((await run($, 'demo off')).text).toBe(STRINGS[lang].demoOff)
+    expect(w.shared.demoHidden).toBe(true)
+    for (const surface of SURFACES) {
+      const ui = await mountPane($, surface)
+      expect(await ui.find({ type: 'Text', text: STRINGS[lang].demoLabel }), `${surface} off 之後不畫示範卡`).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: BOT_NAME[lang] }), `${surface} off 之後不畫機器人名字`).toBeUndefined()
+      await ui.unmount()
+    }
+    expect((await run($, 'demo on')).text).toBe(STRINGS[lang].demoOn)
+    expect(w.shared.demoHidden).toBe(false)
+    for (const surface of SURFACES) {
+      const ui = await mountPane($, surface)
+      expect(await ui.find({ type: 'Text', text: STRINGS[lang].demoLabel }), `${surface} on 之後示範卡回來`).toBeDefined()
+      await ui.unmount()
+    }
+  })
+}
+
+for (const surface of SURFACES) {
+  test(`R6-02：按「隱藏示範」鈕（${surface}）→ 存 demoHidden、開著的 pane 馬上不畫、重新開 pane 也不畫、不經過中繼`, async ($, on) => {
+    const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW] })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    const ui = await mountPane($, surface)
+    expect(await ui.find({ type: 'Text', text: STRINGS.en.demoLabel }), '按之前有').toBeDefined()
+    await ui.press({ key: demoKey(surface) })
+    expect(w.shared.demoHidden).toBe(true)
+    expect(await ui.find({ type: 'Text', text: STRINGS.en.demoLabel }), '按了馬上不畫').toBeUndefined()
+    await ui.unmount()
+    const again = await mountPane($, surface)
+    expect(await again.find({ type: 'Text', text: STRINGS.en.demoLabel }), '重新開 pane 也不畫').toBeUndefined()
+    await again.unmount()
+    expect(JSON.stringify(w.sent), '隱藏狀態不經過中繼').not.toContain('demoHidden')
+  })
+}
+
+test('R6-02：/friends demo 沒給 on／off 或給別的字 → 回說明、不改 demoHidden', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW] })
+  await start($)
+  for (const args of ['demo', 'demo maybe', 'demo hide']) {
+    expect((await run($, args)).text, args).toBe(STRINGS.en.help)
+  }
+  expect(w.shared.demoHidden).toBeUndefined()
+})
+
+test('R6-02：說明清單有 /friends demo on | off 一行（中英）；標示與按鈕字數在上限內且是約定的固定句', () => {
+  for (const lang of ['en', 'zh-TW'] as const) {
+    expect(STRINGS[lang].help).toContain('/friends demo on | off')
+    expect(cellWidth(STRINGS[lang].demoLabel)).toBeLessThanOrEqual(60)
+    expect(cellWidth(STRINGS[lang].demoHide)).toBeLessThanOrEqual(lang === 'en' ? 20 : 12)
+  }
+  expect(STRINGS.en.demoLabel).toBe("Demo only · stays on your computer · can't see you")
+  expect(STRINGS['zh-TW'].demoLabel).toBe('示範用・只在你的電腦上・看不到你')
+  expect(STRINGS.en.demoOff).toBe('Demo friend hidden. Type /friends demo on to show it again.')
+  expect(STRINGS['zh-TW'].demoOff).toBe('已隱藏示範機器人。打 /friends demo on 可以再顯示。')
+  expect(STRINGS.en.demoOn).toBe('Demo friend shown.')
+  expect(STRINGS['zh-TW'].demoOn).toBe('已顯示示範機器人。')
+  expect(STRINGS.en.demoHide).toBe('Hide demo')
+  expect(STRINGS['zh-TW'].demoHide).toBe('隱藏示範')
+})
+
+test('R6-02：終端機很矮、連真好友都快放不下時，示範塊整塊不畫（不拿真好友的位置換，也不剩一個沒標示的機器人）', async ($, on) => {
+  const w = world(on, { store: { membership: MEMBERSHIP }, friends: [ME_ROW] })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  const mount = (bodyRows: number) => $.ui.mount({ plugin: 'with-friends', surface: 'terminal', component: 'Pane', requestId: 'friends', props: { ...PANE_PROPS, bodyColumns: 60, scroll: { offset: 0, bodyRows } } })
+  const HEAD = 7 // 只有自己一人：沒有真好友，標頭 7 行
+  for (const [rows, hasDemo] of [[HEAD + 3, false], [HEAD + 4, true]] as const) {
+    const ui = await mount(rows)
+    expect(!!(await ui.find({ type: 'Text', text: STRINGS.en.demoLabel })), `bodyRows ${rows}`).toBe(hasDemo)
+    expect(!!(await ui.find({ type: 'Text', text: BOT_NAME.en })), `bodyRows ${rows} 機器人名字`).toBe(hasDemo)
+    await ui.unmount()
+  }
+})
+
+test('R056f：所有問答框標題（ask*Header，中英）都在標題上限 12 字內', () => {
+  const HEADER_MAX = 12
+  for (const lang of ['en', 'zh-TW'] as const) {
+    const heads = Object.entries(STRINGS[lang]).filter(([k]) => /^ask.*Header$/.test(k))
+    expect(heads.length).toBeGreaterThan(5)
+    for (const [k, v] of heads) expect([...String(v)].length, `${lang}.${k} = ${v}`).toBeLessThanOrEqual(HEADER_MAX)
+  }
 })

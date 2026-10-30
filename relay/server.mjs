@@ -124,16 +124,16 @@ async function findMember(req) {
   }
   // ver-2c／fix-6：記下這個成員最後帶來的版本；noteVer 回 true＝這個請求要為版本單獨存一次
   const verWrite = core.noteVer(mem, ver(req), Date.now())
-  return { g, groupId: a.groupId, memberId: a.memberId, mem, verWrite, needsSave: expired || verWrite }
+  return { g, groupId: a.groupId, memberId: a.memberId, mem, verWrite, ver: ver(req), needsSave: expired || verWrite }
 }
 
 // 要登入的路由：金鑰不對一律 401
-const authed = fn => async (req, b) => {
+const authed = fn => async (req, b, ip) => {
   const who = await findMember(req)
   if (!who) return [401, { error: '金鑰無效' }]
   const before = saves
   try {
-    return await fn(who, b)
+    return await fn(who, b, ip)
   } finally {
     // 過期動態或版本要存，而路由自己沒存成功（GET /friends 之類，或路由丟了例外）才補存一次（fix-7：用 finally，丟例外也補）；
     // 路由存的時候已經帶到記憶體裡最新的內容。版本單獨寫成功之後才記成已寫，存檔丟錯就不記，下個請求再試
@@ -170,7 +170,7 @@ const routes = {
   },
   'POST /status': authed(async (who, b) => {
     const now = Date.now()
-    const [code, obj] = core.status(who.g, who.memberId, who.mem, b, now)
+    const [code, obj] = core.status(who.g, who.memberId, who.mem, b, now, who.ver)
     if (WEEKLY && code === 200) await core.recordWeekly(db.weekly, who.groupId, now)
     // 開發版連在線狀態一起存（示範中繼重開不掉人）；Worker 版只在動態換了才寫
     if (code === 200) save()
@@ -188,6 +188,16 @@ const routes = {
     if (r[0] === 200) save()
     return r
   }),
+  'POST /name': async (req, b, ip) => {
+    const invalid = core.renameInputError(b)
+    if (invalid) return invalid
+    return await authed(who => {
+      if (limited('rename:' + ip, core.RENAME_GLOBAL_MAX, core.RENAME_GLOBAL_WINDOW_MS)) return [429, { error: '改名太頻繁' }]
+      const r = core.rename(who.mem, b, Date.now())
+      if (r[0] === 200) save()
+      return r
+    })(req, b, ip)
+  },
   'POST /leave': authed(who => {
     const { reply, isEmpty } = core.leave(who.g, who.memberId)
     if (isEmpty) delete db.groups[who.groupId]

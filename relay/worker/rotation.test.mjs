@@ -51,7 +51,7 @@ async function stop() {
 const auth = m => `Bearer ${m.groupId}.${m.memberId}.${m.memberKey}`
 async function call(method, path, body, member) {
   const nonce = randomBytes(18).toString('base64url')
-  const headers = { 'content-type': 'application/json', 'x-friends-nonce': nonce, 'x-friends-origin': base }
+  const headers = { 'content-type': 'application/json', 'x-friends-nonce': nonce, 'x-friends-origin': base, 'x-friends-version': '0.5.6' }
   if (member) headers.authorization = auth(member)
   const response = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
   const bodyText = await response.text()
@@ -86,14 +86,30 @@ try {
   assert.notEqual(first.data.invite, second.data.invite)
   assert.equal((await call('POST', '/join', { invite: first.data.invite, name: 'Old' })).status, 403, '舊邀請碼必須失效')
   assert.equal((await call('POST', '/join', { invite: second.data.invite, name: 'New' })).status, 200, '最新邀請碼可使用')
+  const kicked = await call('POST', '/kick', { memberId: member.memberId }, owner)
+  assert.deepEqual([kicked.status, kicked.data.inviteGeneration], [200, 3], 'kick 必須走同一條單調換碼路徑')
+  assert.equal((await call('GET', '/friends', undefined, member)).status, 401, '被移除者金鑰必須失效')
+  assert.equal((await call('POST', '/join', { invite: second.data.invite, name: 'KickedBack' })).status, 403, 'kick 前的邀請碼必須失效')
+  assert.equal((await call('POST', '/join', { invite: kicked.data.invite, name: 'AfterKick' })).status, 200, 'kick 後的新邀請碼可用')
+  // 0.5.6：找不到這個人是 404（重試已成功的踢人不能被當成「請求不對」）；Worker 與 Node 同一段 core 程式
+  assert.equal((await call('POST', '/kick', { memberId: member.memberId }, owner)).status, 404, '已經被踢的人再踢一次：404')
+  assert.equal((await call('POST', '/kick', {}, owner)).status, 400, '沒給 memberId：400')
+  // 0.5.6：暫停是成員層級（Worker 與 Node 同一段 core 程式）；兩個對話交錯送心跳，晚到的 working 不外漏，明確 paused:false 才恢復
+  const me = async body => (await call('POST', '/status', body, owner)).data.members.find(m => m.isMe)
+  assert.equal((await me({ state: 'working', conn: 'pauseconnA1' })).presence, 'working', '前提：沒暫停時看得到 working')
+  assert.equal((await me({ state: 'idle', conn: 'pauseconnA1', paused: true })).presence, 'idle')
+  assert.equal((await me({ state: 'working', conn: 'pauseconnB2' })).presence, 'idle', '另一個對話晚到的 working 心跳不外漏')
+  assert.equal((await me({ state: 'working', conn: 'pauseconnB2', paused: false })).presence, 'working', '明確 resume 後恢復')
+  assert.equal((await me({ state: 'offline', conn: 'pauseconnA1' })).presence, 'working')
+  assert.equal((await me({ state: 'offline', conn: 'pauseconnB2' })).presence, 'offline')
   assert.equal(hasNoInvite((await call('GET', '/friends', undefined, owner)).data), true, '/friends 不得洩漏邀請資料')
   assert.equal(hasNoInvite((await call('POST', '/status', { state: 'idle', conn: 'rotation01' }, owner)).data), true, '/status 不得洩漏邀請資料')
 
   await stop()
   await start()
   const third = await call('POST', '/invite/rotate', {}, owner)
-  assert.equal(third.data.inviteGeneration, 3, 'Wrangler 重啟後世代不得倒退')
-  assert.equal((await call('POST', '/join', { invite: second.data.invite, name: 'Old2' })).status, 403)
+  assert.equal(third.data.inviteGeneration, 4, 'Wrangler 重啟後世代不得倒退')
+  assert.equal((await call('POST', '/join', { invite: kicked.data.invite, name: 'Old2' })).status, 403)
   passed = 1
   console.log('  ✓ Worker 邀請碼世代、403、簽章、無洩漏、重啟持久性')
 } catch (error) {

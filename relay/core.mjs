@@ -2,12 +2,16 @@
 // 只用 Web 標準（crypto.subtle、getRandomValues），Node 23.6+ 和 Workers 都能跑。
 // 一個群組 g = { name, inviteHash, ownerId, members: { [id]: { name, keyHash, conns: { [conn]: { state, seenAt } }, action, subject, activityAt, seenAt, version, avatar } } }
 import { isAction, isAvatar, isSubject } from '../mod/hooks/taxonomy.ts'
-import { cleanName } from '../mod/hooks/text.ts'
+import { cleanName, isValidNameInput } from '../mod/hooks/text.ts'
 
 // 心跳 60 秒一次（cost-2），漏一次不算離線
 export const OFFLINE_MS = 150_000
 export const MAX_MEMBERS = 10 // 主人 10-11 定案：免費額度內要 2 倍餘裕（relay/COST.md）
 export const MAX_BODY = 4096
+export const MAX_NAME = 20
+export const RENAME_COOLDOWN_MS = 60_000
+export const RENAME_GLOBAL_MAX = 30
+export const RENAME_GLOBAL_WINDOW_MS = 60_000
 // POST 一律要 application/json：別的網站用 no-cors＋text/plain 打不進來（會被瀏覽器預檢擋下），
 // 就不能借瀏覽者的 IP 繞過加入限流、塞假成員（web-2 資安審查 4）
 export const isJsonType = ct => /^application\/json\s*(;|$)/i.test(ct ?? '')
@@ -139,7 +143,8 @@ export async function join(g, groupId, b, now, ver = '') {
 export function presence(mem, now) {
   const live = Object.values(mem.conns ?? {}).filter(c => now - c.seenAt <= OFFLINE_MS)
   if (live.length === 0) return 'offline'
-  return live.some(c => c.state === 'working') ? 'working' : 'idle'
+  // 0.5.6：成員層級暫停旗標在身上時，不論連線各自記什麼都只算在線（讀的時候再擋一次，不靠寫入時有沒有降好）
+  return !mem.paused && live.some(c => c.state === 'working') ? 'working' : 'idle'
 }
 
 // 好友看得到的只有這 10 個欄位（連線 id、金鑰雜湊都不回）
@@ -160,15 +165,23 @@ export function friendsView(g, meId, now) {
   return { groupName: g.name, minVersion: MIN_VERSION, members }
 }
 
+/** 0.5.6 起的外掛會在繼續分享時明確送 paused: false（成員層級暫停旗標只認這個來解除） */
+export const canSendResume = ver => {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(ver)
+  if (!m) return false
+  const [a, b, c] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  return a > 0 || b > 5 || (b === 5 && c >= 6)
+}
+
 /**
  * 送自己某一個對話的狀態（也是心跳）。回 [code, obj, isDirty]：
  * isDirty＝要寫進資料庫的東西變了（動態換了）；在線狀態只是心跳，不算（relay/COST.md：心跳不寫資料庫）
  */
-export function status(g, meId, mem, b, now) {
+export function status(g, meId, mem, b, now, ver = '') {
   const extra = Object.keys(b).filter(k => !['state', 'action', 'subject', 'paused', 'conn', 'version', 'avatar'].includes(k))
   // 固定句子，不回顯請求的鍵名（錯誤只能是固定句子，fix-8）
   if (extra.length) return [400, { error: '不收的欄位' }, false]
-  const state = ['working', 'idle', 'offline'].includes(b.state) ? b.state : 'idle'
+  let state = ['working', 'idle', 'offline'].includes(b.state) ? b.state : 'idle'
   // 動態只能是兩個清單內代碼，或兩個都不給（＝只是心跳，保留舊動態）；暫停分享要明確送 paused: true 才清
   const hasActivity = b.action !== undefined || b.subject !== undefined
   if (hasActivity && !(isAction(b.action) && isSubject(b.subject))) return [400, { error: '動態代碼不在清單裡' }, false]
@@ -179,18 +192,36 @@ export function status(g, meId, mem, b, now) {
   if (b.version !== undefined && !(typeof b.version === 'string' && VERSION_RE.test(b.version))) return [400, { error: '版本格式不對' }, false]
   // ui-22：頭像只收清單內代碼（不收網址、圖片、SVG、自由文字）
   if (b.avatar !== undefined && !isAvatar(b.avatar)) return [400, { error: '頭像不在清單裡' }, false]
+  let isDirty = false
+  // 0.5.6：暫停是「這位成員」的狀態，不是某一個對話的狀態。任一對話送 paused: true，這位成員就一直是暫停，
+  // 直到有對話明確送 paused: false（繼續）；沒帶 paused 的心跳（例如還沒讀到暫停的另一個對話）不會解除，也不會讓好友看到動態。
+  // 以前只把「當下已有的」連線降成 idle，另一個對話的心跳晚到最多約 10 秒又會顯示 working（R056b 留下的空窗）
+  // 舊版外掛（0.5.6 以前，或沒帶版本）從來不送 paused: false：它按「繼續」後只是不再帶 paused。對它們維持舊語意
+  // （沒帶 paused ＝ 繼續），不然按過一次暫停就會永遠卡在暫停
+  const pausedIn = b.paused ?? (canSendResume(ver) ? undefined : false)
+  if (pausedIn === true && mem.paused !== true) {
+    mem.paused = true
+    isDirty = true
+  } else if (pausedIn === false && mem.paused) {
+    delete mem.paused
+    isDirty = true
+  }
+  const isPaused = mem.paused === true
+  // 暫停時中繼一律把 working 當 idle 記（offline 照舊，結束對話要能收掉連線）。放在中繼而不只在外掛：
+  // Node 版與 Worker 版共用這段，舊版外掛（暫停時還送 working）也一併被擋住；外掛端同樣改送 idle（雙保險，見 statusBody）
+  if (isPaused && state === 'working') state = 'idle'
   const conn = b.conn ?? '-'
   const conns = (mem.conns ??= {})
   for (const [id, c] of Object.entries(conns)) if (now - c.seenAt > OFFLINE_MS) delete conns[id]
   if (state === 'offline') delete conns[conn]
   else conns[conn] = { state, seenAt: now }
+  if (isPaused) for (const c of Object.values(conns)) if (c.state === 'working') c.state = 'idle'
   const ids = Object.keys(conns)
   if (ids.length > MAX_CONNS) {
     ids.sort((x, y) => conns[x].seenAt - conns[y].seenAt)
     for (const id of ids.slice(0, ids.length - MAX_CONNS)) delete conns[id]
   }
   mem.seenAt = now
-  let isDirty = false
   // 版本只在換了的時候寫進資料庫（每個對話開始時送一次）
   if (b.version !== undefined && b.version !== mem.version) {
     mem.version = b.version
@@ -200,9 +231,10 @@ export function status(g, meId, mem, b, now) {
     mem.avatar = b.avatar
     isDirty = true
   }
-  if (b.paused === true || hasActivity) {
-    const action = hasActivity ? b.action : ''
-    const subject = hasActivity ? b.subject : ''
+  // 暫停中，沒帶 paused: false 的動態一律不收（別的對話還沒讀到暫停就送來的動態），並把殘留的清掉
+  if (isPaused || hasActivity) {
+    const action = hasActivity && !isPaused ? b.action : ''
+    const subject = hasActivity && !isPaused ? b.subject : ''
     if (action !== mem.action || subject !== mem.subject) {
       mem.action = action
       mem.subject = subject
@@ -253,15 +285,34 @@ export async function rotateInvite(g, groupId, meId) {
 /** 踢人（只有建立者）；踢完自動換邀請碼 */
 export async function kick(g, groupId, meId, b) {
   if (meId !== g.ownerId) return [403, { error: '只有建立者能踢人' }]
-  if (typeof b.memberId !== 'string' || !Object.hasOwn(g.members, b.memberId) || b.memberId === meId) return [400, { error: '找不到這個人' }]
-  const invite = newInvite(groupId)
-  const inviteHash = await sha(invite)
-  const generation = Number.isSafeInteger(g.inviteGeneration) ? g.inviteGeneration : 0
-  if (generation >= Number.MAX_SAFE_INTEGER) return [409, { error: '邀請碼世代已用完' }]
+  if (typeof b.memberId !== 'string' || b.memberId === meId) return [400, { error: '要給別人的成員 id' }]
+  // 0.5.6：找不到這個人回 404（不是 400）。用戶端重試一次已經成功的踢人時會走到這裡：404＝「他已經不在群組」，
+  // 400 則是請求本身有問題，兩者不能混在一起（以前混在 400，重試會被誤報成「沒移除」）
+  if (!Object.hasOwn(g.members, b.memberId)) return [404, { error: '找不到這個人' }]
+  // 移除前先走唯一的換碼實作；換碼若失敗，不能先刪成員。這也讓並行世代規則跟 /invite/rotate 完全一致。
+  const rotated = await rotateInvite(g, groupId, meId)
+  if (rotated[0] !== 200) return rotated
   delete g.members[b.memberId]
-  g.inviteHash = inviteHash
-  g.inviteGeneration = generation + 1
-  return [200, { ok: true, invite, inviteGeneration: g.inviteGeneration }]
+  return [200, { ok: true, invite: rotated[1].invite, inviteGeneration: rotated[1].inviteGeneration }]
+}
+
+/** 改名輸入先完整驗證；固定錯誤不回顯欄位或名字。 */
+export function renameInputError(b) {
+  if (Object.keys(b).some(k => k !== 'name')) return [400, { error: '不收的欄位' }]
+  if (!isValidNameInput(b.name, MAX_NAME)) return [400, { error: '名字格式不對' }]
+  return null
+}
+
+/** 只能改 authorization 對應的自己；同名沿用 join 政策（允許）。 */
+export function rename(mem, b, now = Date.now()) {
+  const invalid = renameInputError(b)
+  if (invalid) return invalid
+  const last = Number.isFinite(mem.renamedAt) ? mem.renamedAt : undefined
+  if (last !== undefined && now >= last && now - last < RENAME_COOLDOWN_MS) return [429, { error: '改名太頻繁' }]
+  // 所有檢查（包含限速）都先完成，才動成員資料。
+  mem.name = b.name.trim()
+  mem.renamedAt = now
+  return [200, { ok: true }]
 }
 
 /** 離開；回 isEmpty＝群組空了要整組刪 */
@@ -277,7 +328,7 @@ export function makeLimiter() {
   const hits = new Map()
   return (key, max, windowMs, now = Date.now()) => {
     const h = hits.get(key)
-    if (!h || now - h.at > windowMs) {
+    if (!h || now - h.at >= windowMs) {
       if (hits.size > 10_000) hits.clear()
       hits.set(key, { at: now, n: 1 })
       return false

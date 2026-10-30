@@ -111,9 +111,13 @@ export default {
         }
       }
       if (!AUTHED.has(route)) return await json(404, { error: 'not found' })
+      if (route === 'POST /name') {
+        const invalid = core.renameInputError(b)
+        if (invalid) return await json(...invalid)
+      }
       const a = core.parseAuth(request.headers.get('authorization'))
       if (!a || !core.GROUP_ID_RE.test(a.groupId)) return await json(401, { error: '金鑰無效' })
-      return await json(...(await groupOf(env, a.groupId).authed(route, a, b, ver, opsEnabled(env), now)))
+      return await json(...(await groupOf(env, a.groupId).authed(route, a, b, ip, ver, opsEnabled(env), now)))
     } catch {
       try { return await json(400, { error: '請求格式錯誤' }) } catch {
         return new Response('{"error":"response signing unavailable"}', { status: 503, headers: { 'content-type': 'application/json; charset=utf-8' } })
@@ -122,7 +126,7 @@ export default {
   },
 }
 
-const AUTHED = new Set(['POST /status', 'GET /friends', 'POST /invite/rotate', 'POST /kick', 'POST /leave'])
+const AUTHED = new Set(['POST /status', 'GET /friends', 'POST /invite/rotate', 'POST /kick', 'POST /name', 'POST /leave'])
 
 export class Group extends DurableObject {
   constructor(ctx, env) {
@@ -205,10 +209,13 @@ export class Group extends DurableObject {
     return r
   }
 
-  async authed(route, a, b, ver, trackOps = false, now = Date.now()) {
+  async authed(route, a, b, ip, ver, trackOps = false, now = Date.now()) {
     const g = await this.load()
     const mem = await core.findMember(g, a.memberId, a.key)
     if (!mem) return [401, { error: '金鑰無效' }]
+    // 名字格式先在入口驗；IP 額度只讓通過 member key 的請求消耗，跟 Node 順序一致。
+    if (route === 'POST /name' && limited('rename:' + ip, core.RENAME_GLOBAL_MAX, core.RENAME_GLOBAL_WINDOW_MS, now))
+      return [429, { error: '改名太頻繁' }]
     if (trackOps) {
       this.ops ??= newGroupOps(now)
       recordMembershipRequest(this.ops, g.members, mem, now)
@@ -225,13 +232,18 @@ export class Group extends DurableObject {
     }
     try {
       if (route === 'POST /status') {
-        const [code, obj, isDirty] = core.status(g, a.memberId, mem, b, now)
+        const [code, obj, isDirty] = core.status(g, a.memberId, mem, b, now, ver)
         if (isDirty) await save()
         return [code, obj]
       }
       if (route === 'GET /friends') return [200, core.friendsView(g, a.memberId, now)]
       if (route === 'POST /invite/rotate' || route === 'POST /kick') {
         const r = route === 'POST /kick' ? await core.kick(g, a.groupId, a.memberId, b) : await core.rotateInvite(g, a.groupId, a.memberId)
+        if (r[0] === 200) await save()
+        return r
+      }
+      if (route === 'POST /name') {
+        const r = core.rename(mem, b, now)
         if (r[0] === 200) await save()
         return r
       }

@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion.
+        Please do not paste API keys, invite codes, or conversation content in any field.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: "What problem would this solve? Please do not paste API keys, invite codes, or conversation content."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: "How would you like it to work? Please do not paste API keys, invite codes, or conversation content."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: "Optional. Other approaches you considered, if any. Please do not paste API keys, invite codes, or conversation content."
+    validations:
+      required: false

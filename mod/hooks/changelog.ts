@@ -14,6 +14,24 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    version: '0.5.6',
+    date: '2026-10-30',
+    items: {
+      'zh-TW': [
+        '只有群主能移除朋友，移除前先確認，舊邀請碼也加不回來。',
+        '你能改顯示給朋友看的名字，朋友面板稍後就會顯示新名字。',
+        '朋友很少時，面板會多一個「機器人（示範）」假好友，先預覽畫面。',
+        '邀請未裝的朋友時，貼給他的文字不帶邀請碼；裝好後再另給。',
+      ],
+      en: [
+        'Only the group owner can remove a friend, and only after confirming; the old invite code stops working.',
+        'You can change the name friends see for you; their panels show the new name a little later.',
+        'When you have very few friends, the panel shows a fake friend labelled Robot (demo) as a preview.',
+        'Invite text for friends who have not installed it yet no longer includes the code; send it later.',
+      ],
+    },
+  },
+  {
     version: '0.5.4',
     date: '2026-10-23', // 先填寫作日，實際部署日在發版那步改成真的（CHANGELOG.md 那段的日期要一起改）
     items: {

@@ -60,7 +60,7 @@ const relays = {
     const child = spawn(process.execPath, [wrangler, 'dev', '--ip', '127.0.0.1', '--port', '8796', '--persist-to', dir, '--var', `ACTIVITY_TTL_MS:${TTL}`,
       '--var', `RESPONSE_SIGNING_PRIVATE_KEY:${TEST_RESPONSE_SIGNING.privateKeyPkcs8}`, '--var', `RESPONSE_SIGNING_KEY_ID:${TEST_RESPONSE_SIGNING.keyId}`,
       '--show-interactive-dev-session=false'], {
-      cwd: join(here, 'worker'), stdio: 'ignore',
+      cwd: join(here, 'worker'), stdio: 'ignore', env: { ...process.env, XDG_CONFIG_HOME: join(dir, 'xdg') },
     })
     const doDir = join(dir, 'v3', 'do', 'friends-status-relay-Group')
     const stored = () => {

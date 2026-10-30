@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security reports
+    url: https://github.com/yanneko27450/with-friends/blob/main/SECURITY.md
+    about: "Please do not open a public issue for security problems. See SECURITY.md for how to report them privately."

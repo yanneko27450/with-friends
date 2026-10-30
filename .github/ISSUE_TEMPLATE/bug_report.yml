@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a bug in Friends with Claude
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+        Please do not paste API keys, invite codes, or conversation content in any field.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: "Describe the problem. Please do not paste API keys, invite codes, or conversation content."
+      placeholder: "A clear description of what went wrong."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: "What did you expect to happen instead? Please do not paste API keys, invite codes, or conversation content."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: "List the steps to reproduce the problem. Please do not paste API keys, invite codes, or conversation content."
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: "Optional. For example: macOS 15, Windows 11, or Ubuntu 24.04."
+    validations:
+      required: false
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: "Optional. The Friends with Claude version, if you know it."
+    validations:
+      required: false
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client
+      description: "Optional. Where were you using Claude Code?"
+      options:
+        - Desktop app
+        - Terminal
+        - VS Code
+        - Other
+    validations:
+      required: false

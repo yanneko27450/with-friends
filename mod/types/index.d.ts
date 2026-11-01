@@ -46,10 +46,12 @@ export type StatusBody = {
   action?: string
   subject?: string
   paused?: boolean
+  /** 0.5.8：最近一次按暫停／繼續的序號（單調遞增）；paused 請求才帶，中繼只認比已存更大的 */
+  pauseSeq?: number
   version?: string
 }
 
-export type Net ={ isOk: boolean; error: string; at: number }
+export type Net ={ isOk: boolean; error: string; at: number; code: number | null }
 
 export type GroupView = { name: string; invite: string; isOwner: boolean; relay: string }
 

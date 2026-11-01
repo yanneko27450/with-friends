@@ -116,13 +116,13 @@ export const STRINGS = {
       "I'll send the join line in a separate message — paste that into the pane, not into the chat with Claude.",
       'This message has no invite code in it.',
     ].join('\n'),
-    opened: 'Friends with Claude pane opened.',
+    opened: 'Friends with Claude panel opened.',
     usageCreate: 'Usage: /friends create <your name>',
     usageJoin: 'Usage: /friends join <invite> [your name]',
     /** sec-14：已經在群組裡又打 create／join。不帶群組名（中繼回的字不進指令輸出） */
     alreadyInGroup: "You're already in a group. To switch groups, run /friends leave first, then join or create again.",
-    created: 'Group created. Press "Copy invite" in the Friends with Claude pane and send it to a friend.',
-    joined: 'Joined the group. The Friends with Claude pane is open.',
+    created: 'Group created. Press "Copy invite" in the Friends with Claude panel and send it to a friend.',
+    joined: 'Joined the group. The Friends with Claude panel is open.',
     paused: 'Sharing paused: friends only see whether you are online.',
     resumed: 'Sharing resumed.',
     hiddenList: (dirs: string[]) => `Folders not shared:\n${dirs.join('\n') || '(none)'}`,
@@ -130,11 +130,11 @@ export const STRINGS = {
     relaySet: (url: string) => `Relay set to ${url}. The next create/join uses it.`,
     notJoined: 'Not in a group yet.',
     removedFromGroup: 'You are no longer in the group.',
-    rotated: 'New invite made; the old one no longer works. Copy it from the pane.',
+    rotated: 'New invite made; the old one no longer works. Copy it from the panel.',
     usageRemove: 'Usage: /friends remove <name>',
     removeOwnerOnly: 'Only the group creator can remove a friend.',
     removeNotFound: 'No friend with that exact name was found.',
-    removeAmbiguous: 'More than one friend has that name. Use the Friends pane to choose the right person.',
+    removeAmbiguous: 'More than one friend has that name. Use the Friends panel to choose the right person.',
     // 盲審 #4：問題只放「固定字彙」描述（頭像代碼、在線狀態、多久前），不放名字；who 由 removeWho 組
     askRemove: (who: string) => `Remove this friend? (${who})`,
     askRemoveSameName: (n: number) => n === 1 ? 'another friend has the same name' : `${n} other friends have the same name`,
@@ -198,7 +198,7 @@ export const STRINGS = {
     autoUpdateNo: "No, I'll update myself",
     usageAutoUpdate: (isOn: boolean) => `Usage: /friends autoupdate on | off (now: ${isOn ? 'on' : 'off'})`,
     autoUpdateOn: 'Auto-update is on: new versions install in the background and take effect in your next new conversation.',
-    autoUpdateOff: 'Auto-update is off. The Friends with Claude pane shows an "Update" button when there is a new version, or run /friends update.',
+    autoUpdateOff: 'Auto-update is off. The Friends with Claude panel shows an "Update" button when there is a new version, or run /friends update.',
     /** ui-19 A：pane 上的更新列與 /friends update */
     updateAvailable: (v: string) => `New version ${v} available`,
     updateNow: 'Update',
@@ -243,15 +243,15 @@ export const STRINGS = {
     leaveYes: 'Leave',
     leaveNo: 'Stay',
     help: [
-      '/friends                        open the Friends pane',
-      '/friends create <name>          create a group (copy the invite from the pane)',
+      '/friends                        open the Friends panel',
+      '/friends create <name>          create a group (copy the invite from the panel)',
       '/friends join <invite> [name]   join a friend\'s group (asks your name if left out)',
       '/friends pause | resume         pause / resume sharing what you work on',
       '/friends status                 one-line summary: how many friends are online (no names)',
       '/friends hide [dir] | unhide [dir] | hidden   folders never shared',
       '/friends relay <url> <key id> <public key> pin and use another relay',
       '/friends rotate                 new invite (group owner)',
-      '/friends remove <name>          remove a friend (group owner; use pane for duplicate names)',
+      '/friends remove <name>          remove a friend (group owner; use panel for duplicate names)',
       '/friends name <new name>        change your own display name',
       '/friends demo on | off          show / hide the demo friend',
       '/friends lang en | zh-TW        interface language',
@@ -314,10 +314,10 @@ export const STRINGS = {
       online === 0 ? '目前沒有朋友在線。' : `${online} 位在線：工作中 ${working}、閒置 ${idle}${top ? `；最多人在：${top}` : ''}。`,
     statusNotJoined: '你還沒加入群組。用 /friends create 你的名字 建立，或用 /friends join 邀請 加入。',
     statusPaused: '你已暫停分享，好友只看得到你在不在線。打 /friends resume 恢復分享。',
-    statusUnreachable: '現在連不上中繼，過一分鐘再打一次 /friends status。',
+    statusUnreachable: '現在連不上伺服器，過一分鐘再打一次 /friends status。',
     avatarSetNotJoined: (a: string) => `頭像換成 ${a} 了，加入群組後朋友就會看到。`,
     alone: '群組裡目前只有你。按「複製邀請碼」傳給朋友。',
-    unreachable: '連不上中繼，稍後自動重試…',
+    unreachable: '連不上伺服器，稍後自動重試…',
     pausedHint: '按「恢復分享」就會再分享。',
     /** R6-02：示範機器人的標示（固定句）、隱藏按鈕與 /friends demo 的回覆 */
     demoLabel: '示範用・只在你的電腦上・看不到你',
@@ -366,20 +366,20 @@ export const STRINGS = {
     usageCreate: '用法：/friends create 你的名字',
     usageJoin: '用法：/friends join 邀請 [你的名字]',
     alreadyInGroup: '你已經在一個群組裡了。要換群組，請先打 /friends leave 離開，再加入或建立。',
-    created: '群組建好了。到 Friends with Claude pane 按「複製邀請碼」傳給朋友。',
-    joined: '已加入群組，Friends with Claude pane 已打開。',
+    created: '群組建好了。到右邊的 Friends with Claude 框按「複製邀請碼」傳給朋友。',
+    joined: '已加入群組，右邊的 Friends with Claude 框已打開。',
     paused: '已暫停分享：好友只看得到你在不在線。',
     resumed: '已恢復分享動態。',
     hiddenList: (dirs: string[]) => `不分享的資料夾：\n${dirs.join('\n') || '（沒有）'}`,
-    usageRelay: (cur: string) => `用法：/friends relay https://... <金鑰代號> <Ed25519 公鑰>（官方中繼兩者都不用填；目前：${cur}）`,
-    relaySet: (url: string) => `中繼改成 ${url}。之後的 create／join 會用這個。`,
+    usageRelay: (cur: string) => `用法：/friends relay https://... <金鑰代號> <Ed25519 公鑰>（官方伺服器兩者都不用填；目前：${cur}）`,
+    relaySet: (url: string) => `伺服器改成 ${url}。之後的 create／join 會用這個。`,
     notJoined: '還沒加入群組。',
     removedFromGroup: '你已不在群組。',
-    rotated: '邀請碼換好了，舊的已失效。新的在 pane 裡複製。',
+    rotated: '邀請碼換好了，舊的已失效。新的在右邊的框裡複製。',
     usageRemove: '用法：/friends remove 名字',
     removeOwnerOnly: '只有群組建立者可以移除朋友。',
     removeNotFound: '找不到完全相同名字的朋友。',
-    removeAmbiguous: '有不只一位朋友使用這個名字，請到 Friends pane 選擇要移除的人。',
+    removeAmbiguous: '有不只一位朋友使用這個名字，請到右邊的 Friends with Claude 框選擇要移除的人。',
     askRemove: (who: string) => `確定移除這位朋友？（${who}）`,
     askRemoveSameName: (n: number) => `另有 ${n} 位朋友同名`,
     askRemoveBadge: (i: number) => `${['藍色', '紫色', '綠色', '橘色', '粉紅色', '棕色'][i] ?? '藍色'}頭像`,
@@ -389,7 +389,7 @@ export const STRINGS = {
     removeNo: '保留',
     removeCancelled: '沒有移除任何人。',
     removedOne: '已移除 1 位',
-    removeFailed: '中繼拒絕移除，資料沒有變；請稍後再試。',
+    removeFailed: '伺服器拒絕移除，資料沒有變；請稍後再試。',
     removeUncertain: '結果可能已經生效，請重新整理，再換一次邀請碼。',
     removeButton: '移除',
     usageName: '用法：/friends name 新名字（1～20 字）',
@@ -404,7 +404,7 @@ export const STRINGS = {
     rotateStale: '換邀請碼的時候，你在別的對話離開或換了群組，所以這裡什麼都沒存。還需要新的邀請碼就再打一次 /friends rotate。',
     left: '已離開群組，不再分享任何狀態。',
     leftKeptOther: '已離開那個群組。你在這段時間從別的對話加入（或建立）了群組，那份保留著。',
-    leftLocalOnlyKeptOther: '只從這台電腦移除了那個群組（中繼沒收到通知，那邊的朋友可能還會看到你的名字，顯示離線）。你在這段時間從別的對話加入（或建立）了群組，那份保留著。',
+    leftLocalOnlyKeptOther: '只從這台電腦移除了那個群組（伺服器沒收到通知，那邊的朋友可能還會看到你的名字，顯示離線）。你在這段時間從別的對話加入（或建立）了群組，那份保留著。',
     leaveStale: '你在別的對話離開或換了群組，所以這次什麼都沒做。還要離開就再按一次「離開群組」。',
     usageLang: '用法：/friends lang en | zh-TW',
     langSet: '介面改成繁體中文。',
@@ -432,7 +432,7 @@ export const STRINGS = {
     autoUpdateNo: '不用，我自己更新',
     usageAutoUpdate: (isOn: boolean) => `用法：/friends autoupdate on | off（目前：${isOn ? '開' : '關'}）`,
     autoUpdateOn: '自動更新已開：有新版會在背景裝好，下一個新對話就是新版。',
-    autoUpdateOff: '自動更新已關。有新版時 Friends with Claude pane 會出現「更新」鈕，也可以打 /friends update。',
+    autoUpdateOff: '自動更新已關。有新版時右邊的 Friends with Claude 框會出現「更新」鈕，也可以打 /friends update。',
     updateAvailable: (v: string) => `有新版 ${v}`,
     updateNow: '更新',
     updateAlways: '以後自動更新',
@@ -449,22 +449,22 @@ export const STRINGS = {
     error: (msg: string) => `Friends with Claude：${msg}`,
     relayError: (status: number) => {
       switch (status) {
-        case 0: return '連不上中繼，檢查網路後再試一次。'
-        case 400: return '中繼不接受這個請求（可能和外掛版本不同）。'
+        case 0: return '連不上伺服器，檢查網路後再試一次。'
+        case 400: return '伺服器不接受這個請求（可能和外掛版本不同）。'
         case 401: return '這台電腦已經不在那個群組裡了（被移除，或群組已刪除）。'
-        case 403: return '中繼拒絕了：邀請可能打錯或失效、群組可能滿了（10 人），或這件事只有群組建立者能做。'
-        case 404: return '這個中繼不支援這個動作，用 /friends relay 檢查中繼網址。'
-        case 503: return `公開中繼滿了；已加入的人仍可繼續使用。要建立或加入其他群組，請自架中繼：${SOURCE_URL}/blob/main/relay/DEPLOY.md`
+        case 403: return '伺服器拒絕了：邀請可能打錯或失效、群組可能滿了（10 人），或這件事只有群組建立者能做。'
+        case 404: return '這個伺服器不支援這個動作，用 /friends relay 檢查伺服器網址。'
+        case 503: return `公開伺服器滿了；已加入的人仍可繼續使用。要建立或加入其他群組，請自己架一個伺服器：${SOURCE_URL}/blob/main/relay/DEPLOY.md`
         case 429: return '嘗試太多次，等一下再試。'
-        case -1: return '中繼回了看不懂的東西。'
+        case -1: return '伺服器回了看不懂的東西。'
         case -2: return '出了點問題，再試一次。'
-        case -3: return '這個中繼網址不能用：要是 https:// 開頭、後面接一般的主機名（http:// 只限本機測試），群組金鑰才不會在網路上明碼傳。請改用 https:// 開頭的中繼網址（或邀請）；這台電腦如果還在那個中繼的群組裡，先打 /friends leave --force。'
-        case -4: return '這個自架中繼的舊釘選沒有金鑰代號。請先用 /friends relay 重新設定，才會連線。'
-        default: return `中繼出了問題（HTTP ${status}），晚點再試。`
+        case -3: return '這個伺服器網址不能用：要是 https:// 開頭、後面接一般的主機名（http:// 只限本機測試），群組金鑰才不會在網路上明碼傳。請改用 https:// 開頭的伺服器網址（或邀請）；這台電腦如果還在那個伺服器的群組裡，先打 /friends leave --force。'
+        case -4: return '這個自架伺服器之前的設定沒有金鑰代號。請先用 /friends relay 重新設定，才會連線。'
+        default: return `伺服器出了問題（HTTP ${status}），晚點再試。`
       }
     },
-    leaveFailed: (msg: string) => `沒有離開成功：${msg}\n你還在群組裡，朋友還看得到你的名字。晚點再打一次 /friends leave；或打 /friends leave --force 只從這台電腦移除（你的名字會留在中繼上）。`,
-    leftLocalOnly: '只從這台電腦移除了群組。中繼沒收到通知，所以朋友還會看到你的名字（顯示離線）。',
+    leaveFailed: (msg: string) => `沒有離開成功：${msg}\n你還在群組裡，朋友還看得到你的名字。晚點再打一次 /friends leave；或打 /friends leave --force 只從這台電腦移除（你的名字會留在伺服器上）。`,
+    leftLocalOnly: '只從這台電腦移除了群組。伺服器沒收到通知，所以朋友還會看到你的名字（顯示離線）。',
     leave: '離開群組',
     askLeave: '確定要離開這個群組嗎？好友會看不到你，之後想回來要重新拿邀請。',
     askLeaveOwner: '你是建立者：離開後由下一位成員接手；群組沒人了就會刪掉。',
@@ -472,22 +472,22 @@ export const STRINGS = {
     leaveYes: '離開',
     leaveNo: '先不要',
     help: [
-      '/friends                        打開 Friends with Claude pane',
-      '/friends create 你的名字          建立群組（邀請碼在 pane 裡複製）',
+      '/friends                        打開右邊的 Friends with Claude 框',
+      '/friends create 你的名字          建立群組（邀請碼在右邊的框裡複製）',
       '/friends join 邀請 [你的名字]      加入朋友的群組（沒給名字會問你）',
       '/friends pause | resume         暫停／恢復分享動態',
       '/friends status                 一句摘要：幾位朋友在線（不列名字）',
       '/friends hide [資料夾] | unhide [資料夾] | hidden   不分享的資料夾',
-      '/friends relay 網址 金鑰代號 公鑰   釘選並改用自架中繼',
+      '/friends relay 網址 金鑰代號 公鑰   設定並改用自架伺服器',
       '/friends rotate                 換邀請碼（建立者）',
-      '/friends remove 名字             移除朋友（建立者；同名請到 pane 選人）',
+      '/friends remove 名字             移除朋友（建立者；同名請到右邊的框選人）',
       '/friends name 新名字             更改自己的顯示名字',
       '/friends demo on | off          顯示或隱藏示範機器人',
       '/friends lang en | zh-TW        介面語言',
       '/friends avatar 代碼              換頭像（cat、fox、robot…）',
       '/friends update                 更新到最新版',
       '/friends autoupdate on | off    有新版時自動更新',
-      '/friends leave [--force]        離開群組（--force：中繼連不上時只從這台電腦移除）',
+      '/friends leave [--force]        離開群組（--force：伺服器連不上時只從這台電腦移除）',
     ].join('\n'),
   },
 } satisfies Record<Lang, unknown>

@@ -165,6 +165,9 @@ export function friendsView(g, meId, now) {
   return { groupName: g.name, minVersion: MIN_VERSION, members }
 }
 
+/** 0.5.8：帶序號的暫停／繼續之後多久內，不信沒帶序號的「繼續」（見 status） */
+export const LEGACY_RESUME_GRACE_MS = 60_000
+
 /** 0.5.6 起的外掛會在繼續分享時明確送 paused: false（成員層級暫停旗標只認這個來解除） */
 export const canSendResume = ver => {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(ver)
@@ -178,7 +181,7 @@ export const canSendResume = ver => {
  * isDirty＝要寫進資料庫的東西變了（動態換了）；在線狀態只是心跳，不算（relay/COST.md：心跳不寫資料庫）
  */
 export function status(g, meId, mem, b, now, ver = '') {
-  const extra = Object.keys(b).filter(k => !['state', 'action', 'subject', 'paused', 'conn', 'version', 'avatar'].includes(k))
+  const extra = Object.keys(b).filter(k => !['state', 'action', 'subject', 'paused', 'pauseSeq', 'conn', 'version', 'avatar'].includes(k))
   // 固定句子，不回顯請求的鍵名（錯誤只能是固定句子，fix-8）
   if (extra.length) return [400, { error: '不收的欄位' }, false]
   let state = ['working', 'idle', 'offline'].includes(b.state) ? b.state : 'idle'
@@ -187,18 +190,43 @@ export function status(g, meId, mem, b, now, ver = '') {
   if (hasActivity && !(isAction(b.action) && isSubject(b.subject))) return [400, { error: '動態代碼不在清單裡' }, false]
   if (b.paused !== undefined && typeof b.paused !== 'boolean') return [400, { error: 'paused 要是 true 或 false' }, false]
   if (b.paused === true && hasActivity) return [400, { error: '暫停時不能帶動態' }, false]
+  // 0.5.8：暫停序號。外掛每次按暫停／繼續產生一個單調遞增的正整數，paused 請求都帶它（見下面的 pausedIn）
+  if (b.pauseSeq !== undefined && !(Number.isSafeInteger(b.pauseSeq) && b.pauseSeq > 0)) return [400, { error: '暫停序號格式不對' }, false]
+  if (b.pauseSeq !== undefined && b.paused === undefined) return [400, { error: '暫停序號要和 paused 一起送' }, false]
   // __proto__ 符合格式，但拿來當物件的鍵會換掉原型、這筆連線就消失了（sec-9）
   if (b.conn !== undefined && !(typeof b.conn === 'string' && CONN_RE.test(b.conn) && b.conn !== '__proto__')) return [400, { error: '連線 id 格式不對' }, false]
   if (b.version !== undefined && !(typeof b.version === 'string' && VERSION_RE.test(b.version))) return [400, { error: '版本格式不對' }, false]
   // ui-22：頭像只收清單內代碼（不收網址、圖片、SVG、自由文字）
   if (b.avatar !== undefined && !isAvatar(b.avatar)) return [400, { error: '頭像不在清單裡' }, false]
+  // 沒帶序號的明確 paused:false（0.5.6／0.5.7 外掛）在帶序號的暫停／繼續剛發生後的緩衝期內不收，並回 409 讓它下一輪重送：
+  // 亂序延遲不會長到緩衝期那麼久；緩衝期一過，混著用舊版對話的人按的繼續就會生效（不會永遠卡在暫停，盲審（三）必修 1）
+  // 只在成員現在是暫停的時候才擋：已經是繼續狀態，沒帶序號的 paused:false 是無害的空操作，照常收（不讓舊外掛無謂地紅字 60 秒）
+  if (b.pauseSeq === undefined && b.paused === false && mem.paused === true && (mem.pauseSeq ?? 0) > 0 && now - (mem.pauseSeqAt ?? 0) < LEGACY_RESUME_GRACE_MS)
+    return [409, { error: '暫停才剛改過，請稍後再試' }, false]
   let isDirty = false
   // 0.5.6：暫停是「這位成員」的狀態，不是某一個對話的狀態。任一對話送 paused: true，這位成員就一直是暫停，
   // 直到有對話明確送 paused: false（繼續）；沒帶 paused 的心跳（例如還沒讀到暫停的另一個對話）不會解除，也不會讓好友看到動態。
   // 以前只把「當下已有的」連線降成 idle，另一個對話的心跳晚到最多約 10 秒又會顯示 working（R056b 留下的空窗）
   // 舊版外掛（0.5.6 以前，或沒帶版本）從來不送 paused: false：它按「繼續」後只是不再帶 paused。對它們維持舊語意
   // （沒帶 paused ＝ 繼續），不然按過一次暫停就會永遠卡在暫停
-  const pausedIn = b.paused ?? (canSendResume(ver) ? undefined : false)
+  let pausedIn = b.paused ?? (canSendResume(ver) ? undefined : false)
+  // 0.5.8 資安：暫停／恢復兩個請求先後顛倒（較早按的「恢復」網路慢、晚到）不能把新的暫停蓋回恢復。
+  // 帶序號的 paused 請求只在序號比已存的大時才算，否則整個 paused 欄位忽略（心跳照收）；
+  // 用過序號的成員，沒帶序號的 paused:false 在帶序號的暫停／繼續後 LEGACY_RESUME_GRACE_MS 內不解除——
+  // 明確的 paused:false（0.5.6／0.5.7 外掛）上面已回 409 讓它重送；更舊外掛沒帶 paused ＝ 繼續，這裡只是忽略。
+  // 緩衝期過後都照舊語意生效（混用舊版對話不會永遠卡在暫停）；沒帶序號的 paused:true 任何時候都生效
+  const seenSeq = mem.pauseSeq ?? 0
+  if (b.pauseSeq !== undefined) {
+    if (b.pauseSeq > seenSeq) {
+      mem.pauseSeq = b.pauseSeq
+      mem.pauseSeqAt = now
+      isDirty = true
+    } else if (!(b.pauseSeq === seenSeq && pausedIn === true)) {
+      // 序號相同時「暫停」仍然有效（偏向暫停）：兩個對話同一毫秒各按暫停與繼續會拿到同一個序號；
+      // 重送同一個暫停本來就是冪等的。同序號的「繼續」不收
+      pausedIn = undefined
+    }
+  } else if (pausedIn === false && seenSeq > 0 && now - (mem.pauseSeqAt ?? 0) < LEGACY_RESUME_GRACE_MS) pausedIn = undefined
   if (pausedIn === true && mem.paused !== true) {
     mem.paused = true
     isDirty = true

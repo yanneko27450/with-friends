@@ -239,6 +239,115 @@ try {
     assert.equal(mem.paused, undefined)
     assert.equal(core.status(g, 'o', mem, { conn: 'convUnit0002', state: 'working', paused: false }, 5000, '0.5.6')[2], false, '重複繼續不重寫')
   })
+  // 0.5.8 資安 ①：暫停／恢復請求先後顛倒。外掛每次按暫停／繼續產生一個單調遞增的 pauseSeq，中繼只接受比已存更大的；
+  // 舊請求（序號 ≤ 已存）晚到，paused 欄位整個忽略，不能把暫停蓋回恢復（隱私承諾：暫停了就是暫停了）
+  // 用另一個群組，免得這個成員留下的序號影響上面沒帶序號的舊版測試
+  await check('0.5.8 暫停序號：晚到的舊「恢復」不能解除新的暫停（含它夾帶的動態）；晚到的舊「暫停」不能蓋掉新的恢復；同序號重送沒事', async () => {
+    const dana = (await call('POST', '/groups', { name: 'Dana' })).data
+    const erin = (await call('POST', '/join', { invite: dana.invite, name: 'Erin' }, undefined, undefined, '192.0.2.201')).data // 另一個 IP：加入每小時 10 次的額度留給後面的測試
+    const D = { conn: 'convSeqDANA01' }
+    const seen = async () => {
+      const a = (await call('GET', '/friends', undefined, erin)).data.members.find(m => m.name === 'Dana')
+      return [a.presence, a.action, a.subject]
+    }
+    const send = (body, version = '0.5.8') => call('POST', '/status', { ...D, ...body }, dana, undefined, undefined, version)
+    const WORK = { state: 'working', action: 'fixing-bugs', subject: 'website' }
+    // 先恢復（序號 100）→ 看得到
+    assert.equal((await send({ ...WORK, paused: false, pauseSeq: 100 })).status, 200)
+    assert.deepEqual(await seen(), ['working', 'fixing-bugs', 'website'])
+    // 使用者按暫停（序號 300）→ 只看得到在線
+    assert.equal((await send({ state: 'idle', paused: true, pauseSeq: 300 })).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', ''])
+    // 更早按的「恢復」（序號 200）網路慢、晚到：必須被忽略，仍是暫停（修前這裡會被解除、好友看到 working）
+    assert.equal((await send({ state: 'working', paused: false, pauseSeq: 200 })).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', ''], '晚到的舊恢復不能解除暫停')
+    // 舊恢復夾帶動態也不收
+    assert.equal((await send({ ...WORK, action: 'learning', subject: 'game', paused: false, pauseSeq: 200 })).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', ''], '晚到的舊恢復夾帶的動態不外漏')
+    // 同序號重送暫停（逾時重試）沒事；同序號但值相反（不該發生）也不能解除
+    assert.equal((await send({ state: 'idle', paused: true, pauseSeq: 300 })).status, 200)
+    assert.equal((await send({ state: 'working', paused: false, pauseSeq: 300 })).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', ''], '同序號不同值不能解除暫停')
+    // 沒帶 paused 的心跳照舊不解除
+    assert.equal((await send({ state: 'working' })).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', ''])
+    // 使用者再按恢復（序號 400）→ 解除；之後晚到的舊暫停（序號 350）不能把它蓋回暫停
+    assert.equal((await send({ ...WORK, paused: false, pauseSeq: 400 })).status, 200)
+    assert.deepEqual(await seen(), ['working', 'fixing-bugs', 'website'])
+    assert.equal((await send({ state: 'working', paused: true, pauseSeq: 350 })).status, 200)
+    assert.deepEqual(await seen(), ['working', 'fixing-bugs', 'website'], '晚到的舊暫停不能蓋掉新的恢復')
+    // 比較新的暫停（序號 500）照常生效
+    assert.equal((await send({ state: 'idle', paused: true, pauseSeq: 500 })).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', ''])
+    await send({ state: 'offline' })
+  })
+  await check('0.5.8 暫停序號：用過序號的成員，沒帶序號的恢復（舊版外掛）不能解除暫停，沒帶序號的暫停仍然有效；格式錯被拒且不動旗標', async () => {
+    const fay = (await call('POST', '/groups', { name: 'Fay' })).data
+    const gus = (await call('POST', '/join', { invite: fay.invite, name: 'Gus' }, undefined, undefined, '192.0.2.202')).data
+    const F = { conn: 'convSeqFAYY001' }
+    const seen = async () => {
+      const a = (await call('GET', '/friends', undefined, gus)).data.members.find(m => m.name === 'Fay')
+      return [a.presence, a.action, a.subject]
+    }
+    const send = (body, version = '0.5.8') => call('POST', '/status', { ...F, ...body }, fay, undefined, undefined, version)
+    const WORK = { state: 'working', action: 'fixing-bugs', subject: 'website' }
+    // 沒用過序號的成員：舊版行為不變（沒帶序號的恢復有效）
+    assert.equal((await send({ state: 'idle', paused: true }, '0.5.7')).status, 200)
+    assert.equal((await send({ ...WORK, paused: false }, '0.5.7')).status, 200)
+    assert.deepEqual(await seen(), ['working', 'fixing-bugs', 'website'])
+    // 用過序號之後：沒帶序號的暫停有效（寧可多暫停）、沒帶序號的恢復（0.5.6／0.5.7）無效
+    assert.equal((await send({ state: 'idle', paused: true, pauseSeq: 1000 })).status, 200)
+    assert.equal((await send({ state: 'working', paused: false }, '0.5.7')).status, 409, '緩衝期內沒帶序號的恢復：回 409 讓舊外掛下一輪重送（不是 200，不然它以為送到了）')
+    assert.deepEqual(await seen(), ['idle', '', ''], '沒帶序號的恢復不能解除有序號的暫停')
+    assert.equal((await send({ state: 'working' }, '')).status, 200) // 更舊的外掛：沒帶 paused ＝ 繼續
+    assert.deepEqual(await seen(), ['idle', '', ''], '更舊外掛沒帶 paused 的心跳也不能解除')
+    assert.equal((await send({ ...WORK, paused: false, pauseSeq: 1001 })).status, 200)
+    assert.deepEqual(await seen(), ['working', 'fixing-bugs', 'website'])
+    assert.equal((await send({ state: 'working', paused: true }, '0.5.7')).status, 200)
+    assert.deepEqual(await seen(), ['idle', '', ''], '沒帶序號的暫停有效')
+    // 格式錯：非正整數、非數字、超過安全整數，或沒搭配 paused → 400，旗標不動（現在是暫停）
+    for (const bad of [0, -1, 1.5, '5', null, [], {}, 2 ** 53, 1e308]) {
+      const r = await send({ state: 'working', paused: false, pauseSeq: bad })
+      assert.equal(r.status, 400, `pauseSeq ${JSON.stringify(bad)} 要被拒`)
+    }
+    assert.equal((await send({ state: 'working', pauseSeq: 2000 })).status, 400, '序號要搭配 paused')
+    assert.deepEqual(await seen(), ['idle', '', ''], '被拒的請求不動旗標')
+    // 序號被拒之後，正常的更大序號照常
+    assert.equal((await send({ ...WORK, paused: false, pauseSeq: 3000 })).status, 200)
+    assert.deepEqual(await seen(), ['working', 'fixing-bugs', 'website'])
+    await send({ state: 'offline' })
+  })
+  await check('0.5.8 暫停序號：core.status 單元——序號接受才寫資料庫、舊序號不寫；序號存在成員身上；好友列表不回序號', async () => {
+    const g = { ownerId: 'o', members: { o: { name: 'O', conns: {}, action: '', subject: '', activityAt: 0, seenAt: 0 } } }
+    const mem = g.members.o
+    const send = (b, now) => core.status(g, 'o', mem, { conn: 'convUnit0001', state: 'idle', ...b }, now, '0.5.8')
+    assert.equal(send({ paused: true, pauseSeq: 10 }, 1000)[2], true)
+    assert.equal(mem.paused, true)
+    assert.equal(mem.pauseSeq, 10)
+    assert.equal(send({ paused: true, pauseSeq: 10 }, 2000)[2], false, '同序號重送不重寫')
+    assert.equal(send({ paused: false, pauseSeq: 9 }, 3000)[2], false, '舊序號不寫')
+    assert.equal(mem.paused, true)
+    assert.equal(mem.pauseSeq, 10)
+    assert.equal(send({ paused: false, pauseSeq: 11 }, 4000)[2], true)
+    assert.equal(mem.paused, undefined)
+    assert.equal(mem.pauseSeq, 11)
+    // 同序號：暫停仍有效（兩個對話同一毫秒各按暫停與繼續會拿到同一個序號，偏向暫停），同序號的繼續不收
+    assert.equal(send({ paused: true, pauseSeq: 11 }, 4500)[2], true)
+    assert.equal(mem.paused, true, '同序號的暫停要生效')
+    assert.equal(send({ paused: false, pauseSeq: 11 }, 4600)[2], false)
+    assert.equal(mem.paused, true, '同序號的繼續不能解除')
+    // 緩衝期：帶序號的暫停／繼續之後 60 秒內，沒帶序號的明確繼續回 409、不動旗標；期滿後生效（混用舊版對話不會永遠卡在暫停）
+    assert.equal(mem.pauseSeqAt, 4000)
+    const legacyResume = now => core.status(g, 'o', mem, { conn: 'convUnit0001', state: 'idle', paused: false }, now, '0.5.7')
+    assert.equal(legacyResume(4700)[0], 409)
+    assert.equal(mem.paused, true)
+    assert.equal(legacyResume(4000 + core.LEGACY_RESUME_GRACE_MS - 1)[0], 409)
+    const after = legacyResume(4000 + core.LEGACY_RESUME_GRACE_MS)
+    assert.deepEqual([after[0], after[2]], [200, true])
+    assert.equal(mem.paused, undefined, '緩衝期滿，沒帶序號的繼續生效')
+    assert.equal(legacyResume(4100)[0], 200, '成員本來就沒暫停：沒帶序號的繼續是無害的空操作，緩衝期內也照常收（不回 409）')
+    for (const v of core.friendsView(g, 'o', 5000).members) assert.equal('pauseSeq' in v, false)
+  })
   await check('同一人兩個對話：一個有動態、一個只送心跳，好友看到的動態不跳（10-11 抓到的 bug）', async () => {
     const A = { conn: 'convAAAAAAAA' }
     const B = { conn: 'convBBBBBBBB' }
@@ -964,7 +1073,7 @@ try {
         // fix-8：路由自己存檔就丟錯（POST /status 本來就會存）→ 回 400；檔案沒變、版本不記成已寫，恢復後下一個請求補寫
         const g2 = (await req('POST', '/join', { invite: a.invite, name: 'VerGus' }, undefined, '0.4.0')).data
         mkdirSync(data + '.tmp')
-        assert.equal((await beat(g2, '0.8.0')).status, 400, '路由自己存檔丟錯 → 400')
+        assert.equal((await beat(g2, '0.8.0')).status, 500, '路由自己存檔丟錯 → 500（不是 400：外掛會把 400 當成「中繼不認得 pauseSeq」）')
         assert.equal(stored(g2), '0.4.0', '存檔失敗，資料檔沒變')
         rmSync(data + '.tmp', { recursive: true })
         assert.equal((await req('GET', '/friends', undefined, auth(g2), '0.8.0')).status, 200)

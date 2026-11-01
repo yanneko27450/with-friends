@@ -14,6 +14,24 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    version: '0.5.8',
+    date: '2026-11-01',
+    items: {
+      'zh-TW': [
+        '面板最底下多了說明網頁的連結，講清楚會送出什麼、不送什麼，有中英兩份。',
+        '面板多了「回報問題」連結，會到公開的回報頁；請不要貼金鑰、邀請碼或對話內容。',
+        '按「暫停分享」再按「繼續」，不會因為舊的請求晚到又變回暫停。',
+        '自動更新失敗時，面板會多一行原因代碼，方便回報。',
+      ],
+      en: [
+        'A link at the bottom of the panel opens a help page on what is sent and what is not, in Chinese and English.',
+        'A Report a problem link opens the public report page; please do not paste keys, invite codes or conversation content.',
+        'Pausing and then resuming sharing no longer flips back to paused when an older request arrives late.',
+        'When an automatic update fails, the panel shows a reason code you can report.',
+      ],
+    },
+  },
+  {
     version: '0.5.6',
     date: '2026-10-30',
     items: {
@@ -36,10 +54,10 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
     date: '2026-10-23', // 先填寫作日，實際部署日在發版那步改成真的（CHANGELOG.md 那段的日期要一起改）
     items: {
       'zh-TW': [
-        '中繼回應現在會驗證真偽；自架中繼升級後要用金鑰代號和公鑰重新釘選。',
-        '中繼回來的好友資料缺少自己或格式不對時，不會採用。',
+        '伺服器回應現在會先檢查是不是真的伺服器送的；自架伺服器升級後要重新設定金鑰代號和公鑰。',
+        '伺服器傳回的好友資料缺少你自己或格式不對時，不會採用。',
         '版本紀錄更容易前後切換，矮的終端機也會正確顯示收起幾位好友。',
-        '公開中繼接近 1,000 個活躍 membership 時會停止新建和加入；原有群組照常使用，也可改用自架中繼。',
+        '公開伺服器的使用名額接近 1,000 個時，會停止新建和加入；原有群組照常使用，也可改用自架伺服器。',
       ],
       en: [
         'Relay replies are now verified; after upgrading a self-hosted relay, pin it again with its key ID and public key.',
@@ -56,7 +74,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       'zh-TW': [
         '版本紀錄一次看一個版本，框頂可以挑要看哪一版（手機用「較舊／較新」按鈕）。',
         '已經在群組裡時，要先離開才能建立或加入另一個群組，舊群組不會留下你的名字。',
-        '只連 https:// 的中繼，你的群組金鑰不會在網路上明碼傳。',
+        '只連 https:// 的伺服器，群組金鑰不會在網路上明碼傳。',
         '在一個對話離開、換群組或換邀請碼，其他對話 10 秒內就會跟上。',
       ],
       en: [
@@ -81,7 +99,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       en: [
         'You can pick an avatar (16 to choose from); your friends see it.',
         'If your version is too old you get a reminder to update, or a note that a new version is coming soon.',
-        'When you are the only one in your group, the pane shows how to invite a friend; when sharing is paused, how to resume.',
+        'When you are the only one in your group, the panel shows how to invite a friend; when sharing is paused, how to resume.',
         'On a phone or in a terminal, type /friends status for a one-line summary of who is online and what they are doing, without names.',
         'New "What\'s new" button: this list.',
       ],

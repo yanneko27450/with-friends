@@ -36,10 +36,10 @@
       <div class="bigfacts">
         <div><b>0</b><span><span class="zh">句對話送到伺服器</span><span class="en">words of your chats sent</span></span></div>
         <div><b>24h</b><span><span class="zh">分類自動刪除</span><span class="en">until categories are deleted</span></span></div>
-        <div><b>25/25</b><span><span class="zh">伺服器測試通過</span><span class="en">server tests passing</span></span></div>
+        <div><b>85/85</b><span><span class="zh">伺服器測試通過</span><span class="en">server tests passing</span></span></div>
       </div>
       <ul class="facts" aria-label="Status">
-        <li class="fact"><span class="dot" id="verdot"></span><span class="zh">目前版本</span><span class="en">Version</span> <span class="num" id="ver">0.4.0</span></li>
+        <li class="fact"><span class="dot" id="verdot"></span><span class="zh">目前版本</span><span class="en">Version</span> <span class="num" id="ver">0.5.8</span></li>
         <li class="fact"><span class="dot wait" id="relaydot"></span><span id="relay"><span class="zh">中繼狀態：載入中</span><span class="en">Relay: checking</span></span></li>
         <li class="fact"><span class="dot amber"></span><span class="zh">外部資安審查：還沒做</span><span class="en">External security review: not yet</span></li>
       </ul>
@@ -52,7 +52,10 @@
       <div class="row"><span><span class="zh">你取的名字（最多 20 字）</span><span class="en">The name you pick (≤ 20 chars)</span></span><span class="v"><span class="zh">到你退出</span><span class="en">until you leave</span></span></div>
       <div class="row"><span><span class="zh">工作中／閒置／離線</span><span class="en">Working / idle / offline</span></span><span class="v"><span class="zh">只在記憶體</span><span class="en">memory only</span></span></div>
       <div class="row"><span><span class="zh">外掛版本號（例 0.4.0，只收數字）</span><span class="en">Plugin version (e.g. 0.4.0, digits only)</span></span><span class="v"><span class="zh">到你退出</span><span class="en">until you leave</span></span></div>
-      <div class="row thick"><span><span class="zh">一個分類＋開始時間</span><span class="en">One category + start time</span></span><span class="v num">24 h</span></div>
+      <div class="row"><span><span class="zh">群組名（你取的，最多 30 字）</span><span class="en">Group name (you pick it, ≤ 30 chars)</span></span><span class="v"><span class="zh">到群組沒人</span><span class="en">until the group is empty</span></span></div>
+      <div class="row"><span><span class="zh">頭像代碼（16 個固定頭像之一）</span><span class="en">Avatar code (one of 16 fixed avatars)</span></span><span class="v"><span class="zh">到你退出</span><span class="en">until you leave</span></span></div>
+      <div class="row"><span><span class="zh">你是不是群主</span><span class="en">Whether you are the group owner</span></span><span class="v"><span class="zh">到你退出</span><span class="en">until you leave</span></span></div>
+      <div class="row thick"><span><span class="zh">兩個分類代碼（動作、對象）＋開始時間</span><span class="en">Two category codes (action and subject) + start time</span></span><span class="v num">24 h</span></div>
       <div class="row thick"><b><span class="zh">送到伺服器的對話內容</span><span class="en">Chat content sent to the server</span></b><b class="v"></b></div>
       <div class="row zero"><span><span class="zh">你打的字</span><span class="en">What you type</span></span><span class="v num">0</span></div>
       <div class="row zero"><span><span class="zh">Claude 的回答</span><span class="en">Claude's replies</span></span><span class="v num">0</span></div>
@@ -87,7 +90,7 @@
       <span class="more"><span class="zh">存什麼、存哪、誰看得到 ↓</span><span class="en">What, where, and who can see it ↓</span></span>
     </a>
     <a class="pcard ver" href="#versions">
-      <div class="n"><span>03</span><span class="num">v<span id="ver3">0.4.0</span></span></div>
+      <div class="n"><span>03</span><span class="num">v<span id="ver3">0.5.8</span></span></div>
       <h2><span class="zh">版本與更新</span><span class="en">Versions and updates</span></h2>
       <p><span class="zh">有新版時面板會提醒你；要不要自動更新，加入時由你決定。</span><span class="en">The panel tells you when there's a new version; whether it updates itself is your choice when you join.</span></p>
       <span class="more"><span class="zh">怎麼發版、你怎麼升 ↓</span><span class="en">How releases work and how to update ↓</span></span>
@@ -311,7 +314,7 @@
       </div>
     </div>
     <div class="chapter-body">
-      <div class="side"><div class="sticky"><span class="zh">目前版本</span><span class="en">Current version</span><br><b class="num bigver" id="ver2">0.4.0</b></div></div>
+      <div class="side"><div class="sticky"><span class="zh">目前版本</span><span class="en">Current version</span><br><b class="num bigver" id="ver2">0.5.8</b></div></div>
       <div>
         <div class="block">
           <h3><span class="zh">我們怎麼發一個新版</span><span class="en">How a release is made</span></h3>
@@ -349,6 +352,11 @@
           <table class="tbl">
             <thead><tr><th><span class="zh">版本</span><span class="en">Version</span></th><th><span class="zh">日期</span><span class="en">Date</span></th><th><span class="zh">改了什麼</span><span class="en">What changed</span></th></tr></thead>
             <tbody>
+              <tr><td class="num">0.5.8</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-11-01</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">面板最底下多了說明網頁和「回報問題」的連結，回報時請不要貼金鑰、邀請碼或對話內容。按「暫停分享」再按「繼續」，不會因為舊的請求晚到又變回暫停。自動更新失敗時，面板會多一行原因代碼，方便回報。</span><span class="en">The panel now links to this help page and to Report a problem; please do not paste keys, invite codes or conversation content into a report. Pausing and then resuming sharing no longer flips back to paused when an older request arrives late. When an automatic update fails, the panel shows a reason code you can report.</span></td></tr>
+              <tr><td class="num">0.5.6</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-30</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">只有群主能移除朋友，移除前會先確認；被移除的人用舊邀請碼加不回來。你能改自己顯示給朋友看的名字，朋友的面板過一會兒就會看到新名字。朋友還很少時，面板會多一個「機器人（示範）」假好友，讓你先看畫面長什麼樣。邀請還沒裝的朋友時，要貼給他的文字不帶邀請碼了；裝好後再另外給他。</span><span class="en">Only the group owner can remove a friend, and only after confirming; the old invite code stops working. You can change the name friends see for you; their panels show the new name a little later. When you have very few friends, the panel shows a fake friend labelled Robot (demo) as a preview. Invite text for friends who have not installed it yet no longer includes the code; send it later.</span></td></tr>
+              <tr><td class="num">0.5.4</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-23</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">伺服器回應現在會驗證真偽；自架伺服器升級後要用金鑰代號和公鑰重新設定。伺服器回來的好友資料缺少自己或格式不對時，不會採用。版本紀錄更容易前後切換，矮的終端機也會正確顯示收起幾位好友。公開伺服器接近 1,000 個活躍使用名額時會停止新建和加入；原有群組照常使用，也可改用自架伺服器。</span><span class="en">Relay replies are now verified; after upgrading a self-hosted relay, pin it again with its key ID and public key. Friend data missing your own entry or having the wrong shape is ignored. What's new is easier to move through, and short terminals now count hidden friends correctly. Near 1,000 active memberships, the public relay stops new creates and joins; existing groups keep working, or you can self-host.</span></td></tr>
+              <tr><td class="num">0.5.2</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-20</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">版本紀錄一次看一個版本，框頂可以挑要看哪一版（手機用「較舊／較新」按鈕）。已經在群組裡時，要先離開才能建立或加入另一個群組，舊群組不會留下你的名字。只連 https:// 的伺服器，你的群組金鑰不會在網路上明碼傳。在一個對話離開、換群組或換邀請碼，其他對話 10 秒內就會跟上。</span><span class="en">What's new shows one version at a time; pick one at the top (on a phone: Older and Newer). Leave your group before creating or joining another, so your name isn't left behind. Only https:// relays are used, so your group key is not sent across the internet in plain text. Leaving, switching groups or a new invite in one conversation reaches your others within about 10 seconds.</span></td></tr>
+              <tr><td class="num">0.5.0</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-17</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">可以選頭像（共 16 款），好友會看到你的頭像。版本太舊時會提醒你更新；暫時還沒有新版可更新時，會告訴你新版快來了；新增「版本紀錄」按鈕。群組只有你一個人時，會教你怎麼邀請朋友；暫停分享時，會教你怎麼恢復。手機和終端機可以打 <code>/friends status</code>，用一行字看有幾位好友在線、大家在忙什麼，不會列出名字。</span><span class="en">You can pick an avatar (16 to choose from); your friends see it. If your version is too old you get a reminder to update, or a note that a new version is coming soon; a new "What's new" button. When you are the only one in your group, the panel shows how to invite a friend; when sharing is paused, how to resume. On a phone or in a terminal, type <code>/friends status</code> for a one-line summary of who is online and what they are doing, without names.</span></td></tr>
               <tr><td class="num">0.4.0</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">面板改版：每位朋友一張三行卡，離線的人收進灰色框；沒加入群組時面板上就能建立群組；右下角顯示自己的版本。外掛會送自己的版本號，面板標出還在用舊版的朋友。自動更新失敗會隔 1 小時再試，最多 3 次。安全：中繼只收 application/json 的請求，別的網站沒辦法借你的瀏覽器塞假成員。</span><span class="en">Redesigned panel: a three-line card per friend, with offline friends in a grey box; create a group right from the panel; your own version in the corner. The plugin sends its version so the panel can flag friends on an old one. A failed auto-update retries every hour, up to 3 times. Security: the relay only accepts application/json requests, so other websites can't use your browser to add fake members.</span></td></tr>
               <tr><td class="num">0.3.4</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">外掛功能沒變：邀請文字和說明頁多一句「需要電腦上的 Claude Code；只用 Chat 的話先不用裝，等網頁版」。</span><span class="en">No change to what the plugin does: the invite and this page now say it needs Claude Code on a computer, and Chat-only users should wait for the web version.</span></td></tr>
               <tr><td class="num">0.3.3</td><td><span class="k"><span class="zh">日期</span><span class="en">Date</span></span><span class="num">2026-10-12</span></td><td><span class="k"><span class="zh">改了什麼</span><span class="en">What changed</span></span><span class="zh">外掛功能沒變：原始碼公開到 GitHub；邀請文字附 repo 網址讓朋友的 Claude 先查再裝、提醒開本機對話、第 2 步改成把邀請貼進右邊的框；安裝包可以重打出同一個 SHA-256。</span><span class="en">No change to what the plugin does: the source went public on GitHub; the invite links to it so your friend's Claude can check first, reminds them to use a local conversation, and step 2 now pastes the invite into the panel. The package can be rebuilt to the same SHA-256.</span></td></tr>
@@ -390,7 +398,7 @@
             </li>
             <li>
               <h4><span class="zh">把邀請那一行貼進右邊的框</span><span class="en">Paste the invite line into the panel</span></h4>
-              <p class="measure"><span class="zh">裝好之後，右邊會自己跳出 Friends with Claude 的框。把朋友給你的那一行（長得像 <code>/friends join https://friends-status-relay…#xxxx</code>）貼進框裡，不是貼進對話。沒跳出來的話，開一個新對話、只傳那一行。</span><span class="en">Once installed, a Friends with Claude pane opens on the right by itself. Paste the line your friend sent (it looks like <code>/friends join https://friends-status-relay…#xxxx</code>) into the box there, not into the chat. If no pane opens, start a new conversation and send only that line.</span></p>
+              <p class="measure"><span class="zh">裝好之後，右邊會自己跳出 Friends with Claude 的框。把朋友給你的那一行（長得像 <code>/friends join https://friends-status-relay…#xxxx</code>）貼進框裡，不是貼進對話。看不到框的話，在對話框打 <code>/friends</code> 把框打開，再把那一行貼進框裡。</span><span class="en">Once installed, a Friends with Claude panel opens on the right by itself. Paste the line your friend gave you (it looks like <code>/friends join https://friends-status-relay…#xxxx</code>) into that panel, not into the conversation. If you can't see the panel, type <code>/friends</code> in the conversation to bring it back, then paste the line into the box.</span></p>
             </li>
             <li>
               <h4><span class="zh">取一個名字</span><span class="en">Pick a name</span></h4>
@@ -409,7 +417,7 @@
           </details>
           <details>
             <summary><span class="zh">想自己開一個群組</span><span class="en">Starting your own group</span></summary>
-            <p class="measure"><span class="zh">裝好後在新對話依序打 <code>/friends relay https://friends-status-relay.friends-status-relay.workers.dev</code> 和 <code>/friends create 你的名字</code>，再到面板按「複製邀請碼」。</span><span class="en">After installing, type <code>/friends relay https://friends-status-relay.friends-status-relay.workers.dev</code> then <code>/friends create your-name</code> in a new conversation, and press "Copy invite" in the panel.</span></p>
+            <p class="measure"><span class="zh">裝好後，面板上按「建立群組」就可以；也可以在新對話打 <code>/friends create 你的名字</code>。建好後按「複製邀請碼」傳給朋友。</span><span class="en">After installing, press "Create a group" in the panel, or type <code>/friends create your-name</code> in a new conversation. Once it's made, press "Copy invite" and send it to your friend.</span></p>
           </details>
         </div>
 
@@ -435,6 +443,12 @@
             </tbody>
           </table>
           <p class="measure"><span class="zh">面板上也有對應的按鈕：朋友名單旁的「移除」，和改自己名字用的「改名字」，做的和上面兩個指令是同一件事。</span><span class="en">The pane has buttons for the same things: "Remove" next to a friend's name, and "Change name" for your own name.</span></p>
+        </div>
+        <div class="block">
+          <h3><span class="zh">頭像與示範好友</span><span class="en">Avatars and the demo friend</span></h3>
+          <p class="measure"><span class="zh">頭像是從 16 個固定頭像裡挑的，送出去的只有那個代碼；面板上的「換頭像」鈕或 <code>/friends avatar 代碼</code> 都可以換。</span><span class="en">Your avatar is one of 16 fixed avatars and only its code is sent. Change it with the "Change avatar" button in the panel or <code>/friends avatar code</code>.</span></p>
+          <p class="measure"><span class="zh">朋友還很少時，面板會多出一個「機器人（示範）」讓你先看畫面長什麼樣。它只畫在你自己的面板上，不是群組成員，不會算進在線人數，也不會送到伺服器。</span><span class="en">When you have very few friends, the panel shows a fake friend labelled Robot (demo) so you can see what it looks like. It is drawn only on your own panel: it is not a group member, it is not counted as online, and nothing about it is sent to the server.</span></p>
+          <p class="measure"><span class="zh">面板底部有「說明與隱私」和「回報問題」兩個連結；「出問題了」按鈕會把外掛版本、你的系統和錯誤代碼複製起來（不含對話內容、名字或群組名），你可以貼給邀請你的朋友。</span><span class="en">The bottom of the panel has "Help & privacy" and "Report a problem" links. The "Something's wrong" button copies the plugin version, your system and an error code (no conversation, names or group name) so you can paste it to the friend who invited you.</span></p>
         </div>
 
         <div class="block">
@@ -473,7 +487,7 @@
 
 <footer>
   <div class="wrap">
-    <p class="measure"><span class="zh">原始碼與資安說明：<a href="https://github.com/yanneko27450/with-friends">github.com/yanneko27450/with-friends</a>（SECURITY.md）。聯絡或回報問題：在 repo 開 issue，不要貼你自己的邀請連結。<br>做法參考了 SaharCarmel/claude-who 和 chrisluo5311/squad-chat（兩個都是 MIT 授權）。這是第三方外掛，不是 Anthropic 的產品。本頁內容寫於 2026-10-12。</span><span class="en">Source and security notes: <a href="https://github.com/yanneko27450/with-friends">github.com/yanneko27450/with-friends</a> (SECURITY.md). To get in touch or report a problem, open an issue there, and don't paste your own invite link.<br>Ideas borrowed from SaharCarmel/claude-who and chrisluo5311/squad-chat (both MIT licensed). A third-party plugin, not an Anthropic product. Page written 2026-10-12.</span></p>
+    <p class="measure"><span class="zh">原始碼與資安說明：<a href="https://github.com/yanneko27450/with-friends">github.com/yanneko27450/with-friends</a>（SECURITY.md）。聯絡或回報問題：在 repo 開 issue，不要貼你自己的邀請連結。也可以直接按面板底部的「回報問題」。<br>想私下回報問題，用 GitHub 的 Security → Report a vulnerability 私下回報。<br>做法參考了 SaharCarmel/claude-who 和 chrisluo5311/squad-chat（兩個都是 MIT 授權）。這是第三方外掛，不是 Anthropic 的產品。本頁內容寫於 TODO_RELEASE_DATE。</span><span class="en">Source and security notes: <a href="https://github.com/yanneko27450/with-friends">github.com/yanneko27450/with-friends</a> (SECURITY.md). To get in touch or report a problem, open an issue there, and don't paste your own invite link. You can also press "Report a problem" at the bottom of the panel.<br>To report a problem privately, use GitHub's Security → Report a vulnerability.<br>Ideas borrowed from SaharCarmel/claude-who and chrisluo5311/squad-chat (both MIT licensed). A third-party plugin, not an Anthropic product. Page written TODO_RELEASE_DATE.</span></p>
   </div>
 </footer>
 <script src="guide.js"></script>

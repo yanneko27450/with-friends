@@ -10,17 +10,25 @@ import { cellWidth, CHANGELOG, changelogRows, PICKER_CHROME } from './changelog'
 import type { ChangelogSection } from './changelog'
 import { AVATAR_EMOJI, avatarSvg, fillIndexFor } from './avatar'
 import { isDemoBot, withDemoBot } from './demo-bot'
-import { t } from './i18n'
+import { SOURCE_URL, t } from './i18n'
 import type { Strings } from './i18n'
+import { buildDiagnostics, diagStrings, errorCodeFromStatus } from './diagnostics'
+import type { DiagInput } from './diagnostics'
 import { redact } from './redact'
 import { ACTION_LABEL, ACTIONS, activityText, AVATARS, isAction, isAvatar, isSubject, LANGS, SUBJECT_LABEL, SUBJECTS } from './taxonomy'
 import type { Action, Avatar, Lang, Subject } from './taxonomy'
 import { cleanName, isValidNameInput } from './text'
+import { failureFromError, failureFromRun, failureOf, installedScope, isJsonUnsupported, reasonCode, REASON_STRINGS, updateArgs } from './update-reason'
+import type { InstallScope, UpdateFailure } from './update-reason'
 import { fromB64url, isResponsePublicKey, newResponseNonce, OFFICIAL_RESPONSE_KEYS, verifyRelaySignature } from './response-signing'
 
 const PANE = 'friends'
 /** 官方中繼（ui-18 D：原本是本機開發用的 127.0.0.1:8789，新使用者直接 create 會失敗） */
 export const DEFAULT_RELAY = 'https://friends-status-relay.friends-status-relay.workers.dev'
+/** 說明頁網址（0.5.8，B4-02）：官方中繼的 /guide（M-6 彙整寫死這個路徑；路徑是否正確由實作部驗） */
+export const GUIDE_URL = `${DEFAULT_RELAY}/guide`
+/** 回報問題網址（0.5.8，B4-02）：公開 repo 的問題頁 */
+export const REPORT_URL = `${SOURCE_URL}/issues`
 const TICK_MS = 10_000
 // 請求量（relay/COST.md）：pane 開著每 15 秒送一次狀態並從回應拿好友列表；pane 關著只每 60 秒送心跳
 const PULL_MS = 15_000
@@ -33,7 +41,7 @@ const friends = atom({ plugin: 'with-friends', key: 'friends' } as const, [] as 
 const me = atom({ plugin: 'with-friends', key: 'me' } as const, {
   state: 'idle', action: '', subject: '', pending: '', isPaused: false, isHidden: false,
 } as Me)
-const net = atom({ plugin: 'with-friends', key: 'net' } as const, { isOk: true, error: '', at: 0 } as Net)
+const net = atom({ plugin: 'with-friends', key: 'net' } as const, { isOk: true, error: '', at: 0, code: null } as Net)
 const group = atom({ plugin: 'with-friends', key: 'group' } as const, null as GroupView | null)
 const lang = atom({ plugin: 'with-friends', key: 'lang' } as const, 'en' as Lang)
 const upd = atom({ plugin: 'with-friends', key: 'update' } as const, { latest: '', state: 'idle' } as UpdateView)
@@ -71,6 +79,15 @@ let relayMinVersion = ''
  * 不跟版本放同一個請求：舊中繼不認得 avatar 會回 400，一起送的話連版本也一起放棄
  */
 let isAvatarSent = false
+/**
+ * 0.5.8：中繼對 pauseSeq 回過 400、拿掉序號重送卻成功了（舊版或自架的中繼不認得序號，或只是一次暫時性錯誤）→
+ * 這個時間之前不帶序號；時間到了再試一次帶序號（不永遠放棄）
+ */
+let pauseSeqSkipUntil = 0
+const PAUSE_SEQ_RETRY_MS = 120_000
+/** 連續幾次「帶序號被 400、拿掉序號才成功」之後，就當這是不認得序號的舊中繼（不是暫時性錯誤）：沒帶序號的「繼續」也算送達 */
+let pauseSeqFallbacks = 0
+const PAUSE_SEQ_OLD_RELAY_AFTER = 3
 let invalidResponseFailures = 0
 let invalidResponseRetryAt = -Infinity
 /** 同一個 hooks 模組實例內，所有 membership read-check-write/delete 共用的 critical section。 */
@@ -149,6 +166,13 @@ export const marketplaceUrl = (relay: string) => `${relay.replace(/\/+$/, '')}/m
 export function relayOrigin(relay: string): string | null {
   const m = /^(https?:\/\/[A-Za-z0-9.-]{1,253}(?::\d{1,5})?)(?:\/|$)/.exec(relay)
   return m ? m[1]! : null
+}
+/** 只回傳列舉值；輸入的字串絕不原樣輸出 */
+export function osFamilyOf(v: { os?: unknown; appdata?: unknown; home?: unknown }): 'windows' | 'mac' | 'linux' | 'unknown' {
+  if (v.os === 'Windows_NT' || (typeof v.appdata === 'string' && v.appdata !== '')) return 'windows'
+  if (typeof v.home === 'string' && v.home.startsWith('/Users/')) return 'mac'
+  if (typeof v.home === 'string' && v.home.startsWith('/home/')) return 'linux'
+  return 'unknown'
 }
 /**
  * sec-15：只跟 https 中繼說話；http 只放行本機（localhost、127.0.0.1，開發測試用）。
@@ -378,21 +402,45 @@ async function findClaude($: EngineInterface): Promise<string> {
 }
 
 /**
- * 跑官方的兩個指令：先更新市集清單，再更新外掛。指令的輸出不顯示（裡面可能有中繼傳來的文字）。
+ * 跑官方的兩個指令：先更新市集清單，再更新外掛。指令的輸出不顯示（裡面可能有中繼傳來的文字），
+ * 失敗只回原因代碼（update-reason.ts），輸出原文不留、不傳給別的函式。
  * cwd 固定在外掛自己的資料夾（ui-19 審查 ⑥：不要在朋友的專案資料夾裡找 claude、讀專案層級的設定）
  */
-async function runUpdate($: EngineInterface): Promise<boolean> {
+async function runUpdate($: EngineInterface): Promise<UpdateFailure | null> {
+  // 外掛裝在哪個範圍只取 scope 值（installed_plugins.json 的內容不顯示、不存）；讀不到就照不帶 --scope 跑，讀不到不算失敗
+  let scope: InstallScope | null = null
   try {
-    const exe = await findClaude($)
-    for (const args of [['plugin', 'marketplace', 'update', 'with-friends'], ['plugin', 'update', 'with-friends@with-friends']]) {
-      // stdin 給空字串：不要接到引擎自己的輸入（桌面版的引擎是串流輸入）
-      const r = await $.process.run([exe, ...args], { cwd: $.plugin.root, stdin: '', timeoutMs: 120_000 })
-      if (r.exitCode !== 0) return false
-    }
-    return true
+    const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+    const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? (home ? `${home}/.claude` : '')
+    if (dir) scope = installedScope(await $.fs.read(`${dir}/plugins/installed_plugins.json`), 'with-friends@with-friends')
+  } catch { /* 讀不到：scope 維持 null */ }
+  let exe: string
+  try {
+    exe = await findClaude($)
   } catch {
-    return false
+    return failureFromError('market')
   }
+  for (const step of ['market', 'plugin'] as const) {
+    // stdin 給空字串：不要接到引擎自己的輸入（桌面版的引擎是串流輸入）
+    let r: unknown
+    try {
+      r = await $.process.run([exe, ...updateArgs(step, scope, true)], { cwd: $.plugin.root, stdin: '', timeoutMs: 120_000 })
+    } catch {
+      return failureFromError(step)
+    }
+    let f = failureFromRun(step, r)
+    if (f !== null && isJsonUnsupported(r)) {
+      // 舊版 claude 不認得 --json：同一步改成不帶 --json 再跑一次（只重試這一次；沒有 JSON 通常判 no_json，是預期）
+      try {
+        r = await $.process.run([exe, ...updateArgs(step, scope, false)], { cwd: $.plugin.root, stdin: '', timeoutMs: 120_000 })
+      } catch {
+        return failureFromError(step)
+      }
+      f = failureFromRun(step, r)
+    }
+    if (f !== null) return f
+  }
+  return null
 }
 
 /** 這個對話正在跑更新：在第一個 await 之前設好，連按兩下也只跑一組（ui-19 審查 ④） */
@@ -415,14 +463,23 @@ async function doUpdate($: EngineInterface): Promise<'ok' | 'failed' | 'busy'> {
     await $.store.set('updatingAt', { at: now, token })
     if (((await $.store.get('updatingAt')) as { token?: unknown } | undefined)?.token !== token) return 'busy'
     await update($, upd, (v): UpdateView => ({ ...v, state: 'running' }))
-    let isOk = false
+    let failure: UpdateFailure | null = null
+    let ran = false
     try {
-      isOk = await runUpdate($)
+      failure = await runUpdate($)
+      ran = true
     } finally {
-      await update($, upd, (v): UpdateView => ({ ...v, state: isOk ? 'done' : 'failed' }))
+      // 先把原因寫好（成功就清掉上一筆），面板改成 done／failed 重畫時才讀得到（B4-08）；開始跑時不清
+      if (ran) {
+        try {
+          if (failure !== null) await $.store.set('updateFail', failure)
+          else await $.store.delete('updateFail')
+        } catch { /* 原因存不起來不影響更新結果；後面的畫面狀態與更新鎖照常處理 */ }
+      }
+      await update($, upd, (v): UpdateView => ({ ...v, state: ran && failure === null ? 'done' : 'failed' }))
       await $.store.delete('updatingAt')
     }
-    return isOk ? 'ok' : 'failed'
+    return ran && failure === null ? 'ok' : 'failed'
   } finally {
     isUpdatingHere = false
   }
@@ -484,6 +541,8 @@ const avatarOf = (f: Friend): Avatar | undefined => {
 async function setAvatar($: EngineInterface, a: Avatar) {
   await $.store.set('avatar', a)
   isAvatarSent = false
+  pauseSeqSkipUntil = 0
+  pauseSeqFallbacks = 0
   void tick($, true)
 }
 /** pane 的「換頭像」：問答框最多 4 個選項，所以先挑一組（4 個表情符號），再從那組挑一個；在「其他」打代碼也可以 */
@@ -569,13 +628,16 @@ export function activityOf(cur: Me): { action: Action; subject: Subject } | null
  * 要送給中繼的內容。同一個人可能同時開好幾個 Code 對話、各自送：
  * 動態只在這個對話有新的時候送一次，其餘只送心跳（中繼收到沒帶代碼＝保留舊動態）；
  * 暫停要明確送 paused，中繼才清掉動態。
+ * 0.5.8：paused 請求（暫停、繼續）都帶 pauseSeq（最近一次按暫停／繼續產生的序號，存在共用 store）：
+ * 中繼只認比已存更大的序號，較早按的請求晚到就不能把新的暫停蓋回恢復。沒序號（舊 store）就照舊不帶。
  */
-export function statusBody(cur: Me, connId: string, sent: string, isResume = false): StatusBody {
+export function statusBody(cur: Me, connId: string, sent: string, isResume = false, pauseSeq?: number): StatusBody {
+  const seq = pauseSeq === undefined ? {} : { pauseSeq }
   // 0.5.6：暫停時不讓好友看出工作中／閒置（承諾是只看得到在線）——working 一律送 idle；中繼也會再擋一次
-  if (cur.isPaused) return { state: cur.state === 'working' ? 'idle' : cur.state, conn: connId, paused: true }
+  if (cur.isPaused) return { state: cur.state === 'working' ? 'idle' : cur.state, conn: connId, paused: true, ...seq }
   // 0.5.6：中繼的暫停是「這位成員」的旗標，只有明確的 paused: false 才解除。繼續之後要送一次（送成功才停），
   // 平常的心跳不帶 paused，免得還沒讀到暫停的舊對話把別的對話的暫停蓋掉
-  const resume = isResume ? { paused: false as const } : {}
+  const resume = isResume ? { paused: false as const, ...seq } : {}
   const a = activityOf(cur)
   if (a && JSON.stringify(a) !== sent) return { state: cur.state, conn: connId, ...a, ...resume }
   return { state: cur.state, conn: connId, ...resume }
@@ -603,6 +665,8 @@ async function setGroup($: EngineInterface, m: Membership | undefined) {
   // 換了群組（或剛開對話）：版本要再送一次給新群組
   isVersionSent = false
   isAvatarSent = false
+  pauseSeqSkipUntil = 0
+  pauseSeqFallbacks = 0
   // 新群組可能在別的中繼：等它回了再算（ver-2）
   relayMinVersion = ''
   await update($, group, () => (m ? { name: m.groupName, invite: m.invite, isOwner: m.isOwner, relay: m.relay } : null))
@@ -639,8 +703,16 @@ export async function tick($: EngineInterface, force = false) {
       await retitle($, l)
     }
     let cur = await read($, me)
-    // 別的對話可能按了暫停／繼續
-    const isPaused = Boolean(await $.store.get('paused'))
+    // 別的對話可能按了暫停／繼續。paused 和序號一起讀，而且要互相吻合才帶序號（見 readPauseState）
+    const ps = await readPauseState($)
+    const storedSeq = ps.seq
+    if (pauseSeqSkipUntil - now > PAUSE_SEQ_RETRY_MS) pauseSeqSkipUntil = 0 // 時鐘往回跳：不讓退讓期間被拉長
+    const pauseSeq = now < pauseSeqSkipUntil ? undefined : storedSeq
+    // 有序號可送卻沒帶（退讓期間，或這一輪被 400 後拿掉重送）：中繼若認得序號會把沒帶序號的 paused:false 忽略（回 200），
+    // 所以不能把這樣送出的「繼續」當成已送達——記號留著，等能帶序號時再送
+    // （連續退讓過好幾次＝舊中繼：它本來就不看序號，沒帶序號的繼續就是送達）
+    let isSeqDropped = storedSeq !== undefined && pauseSeq === undefined && pauseSeqFallbacks < PAUSE_SEQ_OLD_RELAY_AFTER
+    const isPaused = ps.isPaused
     if (isPaused !== cur.isPaused) {
       await update($, me, v => withPaused(v, isPaused))
       if (isPaused) sentActivity = ''
@@ -662,8 +734,10 @@ export async function tick($: EngineInterface, force = false) {
     // 記號是每次按「繼續」新產生的 token（不是 true）：送出期間又經過「暫停→繼續」時，舊的回應只清得掉自己那一個 token
     const storedToken = await $.store.get('resumePending')
     const resumeToken = !cur.isPaused && typeof storedToken === 'string' && storedToken !== '' ? storedToken : ''
-    const isResumePending = !cur.isPaused && (resumeToken !== '' || needsResume)
-    const body = statusBody(cur, conn, sentActivity, isResumePending)
+    // paused 和序號不吻合（別的對話按到一半，或是舊版對話只改了 paused）：先不送「繼續」，等吻合了帶對的序號送；
+    // 暫停照送（沒序號，中繼一律收，寧可多暫停）
+    const isResumePending = !cur.isPaused && !ps.isMismatch && (resumeToken !== '' || needsResume)
+    const body = statusBody(cur, conn, sentActivity, isResumePending, pauseSeq)
     // 要在送出「之前」就記：逾時、5xx、回應丟失的 paused: true 照樣可能已經到了中繼（而且可能比別的對話的 paused: false 晚到）
     if (body.paused === true) needsResume = true
     if (!isVersionSent) {
@@ -676,14 +750,32 @@ export async function tick($: EngineInterface, force = false) {
       if (isAvatar(a)) out.avatar = a
       else isAvatarSent = true
     }
-    const signature = JSON.stringify({ state: body.state, paused: body.paused })
+    const signature = JSON.stringify({ state: body.state, paused: body.paused, pauseSeq: body.pauseSeq })
     const gap = isPaneOpen ? PULL_MS : HEARTBEAT_MS
     if (!(force || body.action || out.avatar || signature !== lastPushed || now - lastPushAt >= gap)) return
     // 送狀態的回應裡就有好友列表，不另外拉
     let data: Awaited<ReturnType<typeof relayCall>>
     let isAvatarRejected = false
+    // 0.5.8：舊版或自架的中繼不認得 pauseSeq 會回 400，暫停請求就永遠送不到（畫面顯示已暫停、好友卻還看得到動態）。
+    // 帶序號被 400 → 同一筆拿掉序號立刻重送；重送成功才確定是序號的問題，這個對話之後不再帶序號（等於退回 0.5.7 的行為）
+    const target = m
+    const send = async (payload: StatusBody & { avatar?: Avatar }) => {
+      try {
+        const r = await relayCall($, target.relay, 'POST', '/status', payload, target)
+        if (payload.pauseSeq !== undefined) pauseSeqFallbacks = 0 // 帶序號直接成功：這個中繼認得序號
+        return r
+      } catch (e) {
+        if (payload.pauseSeq === undefined || !(e instanceof RelayError) || e.status !== 400) throw e
+        const { pauseSeq: _dropped, ...rest } = payload
+        const r = await relayCall($, target.relay, 'POST', '/status', rest, target)
+        pauseSeqSkipUntil = now + PAUSE_SEQ_RETRY_MS
+        pauseSeqFallbacks += 1
+        if (pauseSeqFallbacks < PAUSE_SEQ_OLD_RELAY_AFTER) isSeqDropped = true
+        return r
+      }
+    }
     try {
-      data = await relayCall($, m.relay, 'POST', '/status', out, m)
+      data = await send(out)
     } catch (err) {
       // 舊版或自架的中繼不認得 version 欄位會回 400：這個對話不再送版本，下一輪照常送狀態（審查必修 1）
       if (body.version && err instanceof RelayError && err.status === 400) isVersionSent = true
@@ -696,13 +788,12 @@ export async function tick($: EngineInterface, force = false) {
       // （同一輪同時帶頭像和新代碼、中繼只拒絕代碼時，第一次 400 會被當成頭像被拒，這個對話之後不再送頭像；機率很低）
       const canFallBack = (e: unknown) =>
         e instanceof RelayError && e.status === 400 && !body.version && !!body.action && !(body.action === 'other' && body.subject === 'other')
-      const sentAs = m // 閉包裡要一個確定不是 undefined 的參照（m 宣告在 try 外面）
-      const fallBack = () => relayCall($, sentAs.relay, 'POST', '/status', { ...body, action: 'other', subject: 'other' }, sentAs)
+      const fallBack = () => send({ ...body, action: 'other', subject: 'other' })
       if (out.avatar && err instanceof RelayError && err.status === 400) {
         isAvatarSent = true
         isAvatarRejected = true
         try {
-          data = await relayCall($, m.relay, 'POST', '/status', body, m)
+          data = await send(body)
         } catch (err2) {
           if (!canFallBack(err2)) throw err2
           data = await fallBack()
@@ -718,8 +809,8 @@ export async function tick($: EngineInterface, force = false) {
     if (!isSameMember(currentMembership, m)) return
     if (body.action) sentActivity = JSON.stringify({ action: body.action, subject: body.subject })
     if (body.version) isVersionSent = true
-    if (body.paused === false) needsResume = false
-    if (body.paused === false && resumeToken !== '' && (await $.store.get('resumePending')) === resumeToken) await $.store.delete('resumePending')
+    if (body.paused === false && !isSeqDropped) needsResume = false
+    if (body.paused === false && !isSeqDropped && resumeToken !== '' && (await $.store.get('resumePending')) === resumeToken) await $.store.delete('resumePending')
     // 送出去的期間又換了頭像（setAvatar 把旗子放下、但那次 tick 因為 isBusy 沒跑）：store 跟送出的不一樣就下一輪再送
     if (out.avatar && !isAvatarRejected) isAvatarSent = (await $.store.get('avatar')) === out.avatar
     lastPushed = signature
@@ -730,7 +821,7 @@ export async function tick($: EngineInterface, force = false) {
       const rows = friendsFrom(data.members).map(f => f.isMe ? { ...f, name: cleanName(currentMembership.name, 20) || '?' } : f)
       await update($, friends, () => rows)
     }
-    await update($, net, () => ({ isOk: true, error: '', at: now }))
+    await update($, net, () => ({ isOk: true, error: '', at: now, code: null }))
     invalidResponseFailures = 0
     invalidResponseRetryAt = -Infinity
   } catch (err) {
@@ -742,7 +833,7 @@ export async function tick($: EngineInterface, force = false) {
       await $.store.set('removedNotice', true)
       await update($, removed, () => true)
       await forgetGroup($, m)
-      await update($, net, () => ({ isOk: true, error: '', at: now }))
+      await update($, net, () => ({ isOk: true, error: '', at: now, code: null }))
       return
     }
     // ui-4：連不上（網路）→ 說會自動重試（每 10 秒的 tick 本來就會重試）；其他錯誤照狀態碼挑固定句子
@@ -751,7 +842,7 @@ export async function tick($: EngineInterface, force = false) {
       invalidResponseFailures++
       invalidResponseRetryAt = now + Math.min(5 * 60_000, TICK_MS * 2 ** Math.min(invalidResponseFailures - 1, 5))
     }
-    await update($, net, () => ({ isOk: false, error, at: now }))
+    await update($, net, () => ({ isOk: false, error, at: now, code: errorCodeFromStatus(err instanceof RelayError ? err.status : -2) }))
   } finally {
     isBusy = false
   }
@@ -902,9 +993,37 @@ async function setDemoHidden($: EngineInterface, isHidden: boolean) {
 }
 const nextLang = (l: Lang): Lang => LANGS[(LANGS.indexOf(l) + 1) % LANGS.length] ?? 'en'
 
+const isSeq = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v > 0
+
+/**
+ * 共用 store 裡的暫停狀態：舊版就有的 `paused`（所有版本都讀），加上 0.5.8 的 `pauseState` { paused, seq }（序號和它對應的 paused 一起寫，一次讀出）。
+ * 兩個要互相吻合（pauseState.paused === paused）才拿序號去用；不吻合＝別的對話按到一半，或舊版對話只改了 paused → seq 是 undefined（isMismatch）。
+ * 沒有 pauseState（舊 store）＝沒序號、不算不吻合，paused 請求就不帶序號，中繼照舊處理。
+ */
+async function readPauseState($: EngineInterface): Promise<{ isPaused: boolean; seq: number | undefined; isMismatch: boolean }> {
+  const isPaused = Boolean(await $.store.get('paused'))
+  const ps = await $.store.get('pauseState')
+  if (typeof ps !== 'object' || ps === null) return { isPaused, seq: undefined, isMismatch: false }
+  const { paused, seq } = ps as { paused?: unknown; seq?: unknown }
+  if (paused !== isPaused) return { isPaused, seq: undefined, isMismatch: true }
+  return { isPaused, seq: isSeq(seq) ? seq : undefined, isMismatch: false }
+}
+
 async function setPaused($: EngineInterface, isPaused: boolean) {
   if (!isPaused) needsResume = true // 先記在這個對話，後面的 store 寫入失敗也不會漏送
+  // 0.5.8：序號＝現在的時間，但一定比上一次大（時鐘倒退、同一毫秒按兩下都不會重複或變小）。
+  // 先寫 paused、再寫 pauseState { paused, seq }（讀的人兩個一起讀，吻合才用序號，見 readPauseState）。
+  // pauseState 寫失敗就把 paused 退回去再把錯丟出去：不能留下「store 說已暫停、序號卻是舊的」——中繼會把舊序號的暫停忽略，好友就還看得到動態
+  const prev = ((await $.store.get('pauseState')) as { seq?: unknown } | undefined)?.seq
+  const seq = Math.max(Math.floor(await $.clock.now()), (isSeq(prev) ? prev : 0) + 1)
+  const wasPaused = Boolean(await $.store.get('paused'))
   await $.store.set('paused', isPaused)
+  try {
+    await $.store.set('pauseState', { paused: isPaused, seq })
+  } catch (err) {
+    try { await $.store.set('paused', wasPaused) } catch { /* store 整個壞了，原本的錯誤比較重要 */ }
+    throw err
+  }
   await update($, me, v => withPaused(v, isPaused))
   if (isPaused) sentActivity = ''
   // 繼續：記下「中繼那邊的暫停旗標還沒解」，任一對話送 paused: false 拿到 200 才清；再暫停就作廢
@@ -1427,7 +1546,12 @@ export const register: Register = on => {
         case 'update': {
           if (!(await checkUpdate($))) return { text: s.upToDate }
           const result = await doUpdate($)
-          return { text: result === 'ok' ? s.updated : result === 'busy' ? s.updateBusy : s.updateFailed }
+          if (result !== 'failed') return { text: result === 'ok' ? s.updated : s.updateBusy }
+          const f = failureOf(await $.store.get('updateFail'))
+          if (f === null) return { text: s.updateFailed }
+          // 對話文字不顯示 other: 的原碼，一律只寫 unknown_code（規劃部補充 ①）
+          const shown: UpdateFailure = f.otherCode ? { step: f.step, exitCode: f.exitCode, reason: 'unknown_code' } : f
+          return { text: s.updateFailed + '\n' + REASON_STRINGS[l].line(reasonCode(shown)) }
         }
         case 'status': {
           // ui-9：手機看不到 pane，只能靠指令；指令輸出會進對話，所以只回數字和清單內分類的文字，不列名字
@@ -1512,7 +1636,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
-    const { Box, Text, Button } = els
+    const { Box, Text, Button, Link } = els
     // 手機 app 沒有輸入框（官方型別：mobile 不給 Input、Select）。用介面判斷（ui-29h）：$.ui.resolve 三種介面都給（ui-29 實測），不能靠 'Input' in els，
     // 實機上 resolve 不一定照介面拿掉元件，手機就會出現一個畫不出來、貼不進去的框
     // 刻意用白名單：型別裡還有 vscode（目前還不接 pane），不認得的介面一律退回「教打指令」那句
@@ -1524,6 +1648,7 @@ export const register: Register = on => {
     const mine = await read($, me)
     const n = await read($, net)
     const u = await read($, upd)
+    const lastFail = failureOf(await $.store.get('updateFail'))
     const wn = await read($, whatsNew)
     const wasRemoved = await read($, removed)
     const isAutoUpdate = (await $.store.get('autoUpdate')) === true
@@ -1543,6 +1668,7 @@ export const register: Register = on => {
       : u.state === 'failed' || u.state === 'busy' ? (
         <Box key="upd" flexDirection="column">
           <Text color={u.state === 'failed' ? 'error' : 'warning'}>{u.state === 'failed' ? s.updateFailedPane : s.updateBusy}</Text>
+          {u.state === 'failed' && lastFail !== null ? <Text key="upd-reason" dimColor>{REASON_STRINGS[l].line(reasonCode(lastFail))}</Text> : null}
           <Box flexDirection="row"><Button key="update" label={s.updateRetry} onPress={() => { void pressUpdate($) }} /></Box>
         </Box>
       )
@@ -1554,28 +1680,73 @@ export const register: Register = on => {
       )
       : isTooOld ? <Text key="upd" color="error" wrap="truncate-end">{s.tooOldWait}</Text>
       : u.latest ? (
-        <Box key="upd" flexDirection="row" gap={1} alignItems="center">
-          <Text color="warning" wrap="truncate-end">{s.updateAvailable(u.latest)}</Text>
-          <Button key="update" label={s.updateNow} onPress={() => { void pressUpdate($) }} />
-          {!isAutoUpdate && (
-            <Button key="autoOn" label={s.updateAlways} onPress={() => {
-              void (async () => { await $.store.set('autoUpdate', true); await pressUpdate($) })()
-            }} />
-          )}
+        <Box key="upd" flexDirection="column">
+          <Box flexDirection="row" gap={1} alignItems="center">
+            <Text color="warning" wrap="truncate-end">{s.updateAvailable(u.latest)}</Text>
+            <Button key="update" label={s.updateNow} onPress={() => { void pressUpdate($) }} />
+            {!isAutoUpdate && (
+              <Button key="autoOn" label={s.updateAlways} onPress={() => {
+                void (async () => { await $.store.set('autoUpdate', true); await pressUpdate($) })()
+              }} />
+            )}
+          </Box>
+          {lastFail !== null ? <Text key="upd-reason" dimColor>{REASON_STRINGS[l].line(reasonCode(lastFail))}</Text> : null}
         </Box>
       )
       : null
-    const updateRows = updateRow === null ? 0 : u.state === 'failed' ? 4 : u.state === 'busy' ? 3 : 1
+    // 有原因列時高度預算加 2（卡第 8 點）：失敗 4→6、「有新版＋上次失敗」1→3
+    const hasReasonRow = lastFail !== null && updateRow !== null && (u.state === 'failed' || (u.state === 'idle' && !!u.latest && !isTooOld))
+    const updateRows = updateRow === null ? 0 : u.state === 'failed' ? (hasReasonRow ? 6 : 4) : u.state === 'busy' ? 3 : hasReasonRow ? 3 : 1
     const versionRow = ver ? (
       <Box key="ver" flexDirection="row" justifyContent="flex-end">
         <Text dimColor>v{ver}</Text>
+      </Box>
+    ) : null
+    // 0.5.8（B4-02，接 B3-04）：「出問題了」按鈕——把診斷文字複製到剪貼簿；不送任何請求到中繼、不改 store。沒加入與已加入共用
+    const diagButton = (
+      <Button key="diag" label={diagStrings(l).button} onPress={press => {
+        void (async () => {
+          const input: DiagInput = {
+            version: ver,
+            surface: e.surface,
+            os: osFamilyOf({ os: await $.env.get('OS'), appdata: await $.env.get('APPDATA'), home: await $.env.get('HOME') }),
+            lang: l,
+            relayKind: g ? (relayOrigin(g.relay) === DEFAULT_RELAY ? 'official' : 'self-hosted') : 'none',
+            isInGroup: !!g,
+            isPaused: mine.isPaused,
+            errorCode: n.code,
+          }
+          // 規劃部補充 ②：最近一次更新失敗的原因代碼也帶進診斷（同 step/reason/exit 格式；沒有失敗就不帶；DiagInput 沒有這個欄位，不改 diagnostics.ts，只在複製的文字尾端加一行）
+          const failNow = failureOf(await $.store.get('updateFail'))
+          const diagText = buildDiagnostics(input) + (failNow !== null ? '\nupdate-failure: ' + reasonCode(failNow) : '')
+          const r = await $.ui.copy({ text: diagText, surface: press.surface })
+          const l2 = await read($, lang)
+          $.ui.toast(r.isCopied ? diagStrings(l2).copied : diagStrings(l2).copyFailed)
+        })()
+      }} />
+    )
+    // 0.5.8（B4-02）：說明／回報連結列（桌面／手機用 Link；終端機不用 Link，改用文字行，見終端機畫面的 termLinkLines）
+    const linksBlock = e.surface === 'terminal' ? null : (
+      <Box key="links" flexDirection="column">
+        <Box flexDirection="row" gap={1}>
+          <Link key="guide-link" href={GUIDE_URL} label={s.guideLink} />
+          <Link key="report-link" href={REPORT_URL} label={s.reportLink} />
+        </Box>
+        <Text dimColor>{s.reportPrivacyNote}</Text>
+      </Box>
+    )
+    // 0.5.8（B4-02）：讀不到版本號（whatsNewRow 為 null）時，「出問題了」自己一列靠右（桌面／手機；終端機放在改名那一列、沒加入的終端機不畫）
+    const diagSoloRow = !ver && e.surface !== 'terminal' ? (
+      <Box key="diag-row" flexDirection="row" justifyContent="flex-end">
+        {diagButton}
       </Box>
     ) : null
     // ui-28（主人 10-16「加入版本紀錄這個按鈕放在版本號的底下」「跳一個小框框出來 然後過個幾秒把它關掉」）：
     // 版本號底下同樣靠右一顆「版本紀錄」；按了在它正下方跳出有框線的小框框，每個版本更新了什麼（新的在上，只列版本號 ≤ 自己的），
     // 約 10 秒（WHATS_NEW_MS）自動收起，開著再按一次立刻收起。讀不到版本就不畫整塊
     const whatsNewRow = ver ? (
-      <Box key="wn-row" flexDirection="row" justifyContent="flex-end">
+      <Box key="wn-row" flexDirection="row" justifyContent="flex-end" gap={1}>
+        {e.surface !== 'terminal' && diagButton}
         <Button key="whatsnew" label={s.whatsNew} onPress={() => { void toggleWhatsNew($) }} />
       </Box>
     ) : null
@@ -1694,6 +1865,8 @@ export const register: Register = on => {
             <Button key="create" label={s.createGroup} onPress={() => { void pressCreate() }} />
             <Button key="later" label={s.later} onPress={() => { isPaneOpen = false; void $.ui.close({ id: PANE }) }} />
           </Box>
+          {linksBlock}
+          {diagSoloRow}
           {versionBlock(allSections)}
         </Box>
       )
@@ -1836,7 +2009,8 @@ export const register: Register = on => {
       const rows = e.props.scroll ? e.props.scroll.bodyRows : 100
       // 標題 2＋間距 1；「你」標籤 1＋動態 1＋按鈕 1＋間距 1＋離開 1＋間距 1；區塊間距 2
       // R6-02：示範卡（上下框線 2＋三行）＋框外間距 1
-      const fixedRows = 3 + (n.isOk ? 0 : 1) + (updateRow ? updateRows + 1 : 0) + 6 + (pausedHint ? 1 : 0) + 2 + (versionRow ? versionRows + 1 : 0) + (demoFriend ? 6 : 0)
+      // B4-02：沒版本號時「出問題了」自己一列（1＋間距）
+      const fixedBase = 3 + (n.isOk ? 0 : 1) + (updateRow ? updateRows + 1 : 0) + 6 + (pausedHint ? 1 : 0) + 2 + (versionRow ? versionRows + 1 : 0) + (demoFriend ? 6 : 0) + (diagSoloRow ? 2 : 0)
       // 每位朋友：三行字＋上面空一行
       const CARD_ROWS = 4
       // 離線框：上下框線 2＋標題 1＋框外間距 1，每人 2 行（頭像），多的收成「還有 N 位」1 行
@@ -1844,6 +2018,11 @@ export const register: Register = on => {
       const OFFLINE_FRAME = 4
       const wantOffline = Math.min(offlineFriends.length, OFFLINE_MAX)
       const offlineRowsFor = (k: number) => (offlineFriends.length ? OFFLINE_FRAME + 2 * k + (offlineFriends.length > k ? 1 : 0) : 0)
+      // B4-02：說明／回報連結列（連結 1＋小字 1＋間距 1；小字折行多算 1）。好友的位置優先：全部好友（含離線框）都放得下、還剩 4 行才畫連結列，
+      // 不拿好友的位置換；「出問題了」在版本那一列、不受這條影響
+      const LINKS_ROWS = 4
+      const showLinks = !!linksBlock && rows - fixedBase - offlineRowsFor(wantOffline) - LINKS_ROWS >= CARD_ROWS * feed.length
+      const fixedRows = fixedBase + (showLinks ? LINKS_ROWS : 0)
       const feedFloor = CARD_ROWS * Math.min(feed.length, 1)
       const shownOfflineN = rows - fixedRows - offlineRowsFor(wantOffline) >= feedFloor ? wantOffline : 0
       const shownOffline = offlineFriends.slice(0, shownOfflineN)
@@ -1917,6 +2096,8 @@ export const register: Register = on => {
               {leaveButton}
             </Box>
           </Box>
+          {showLinks && linksBlock}
+          {diagSoloRow}
           {versionBlock(allSections)}
         </Box>
       )
@@ -1939,6 +2120,14 @@ export const register: Register = on => {
     const isTermBare = !isTermFull && termRoom - 2 >= changelogRows(allSections, bodyColumns)
     const termSections: ChangelogSection[] = isTermFull || isTermBare ? allSections : []
     const termVersionBlock = termRoom >= 2 ? versionBlock(termSections, isTermFull) : null
+    // 0.5.8（B4-02）：終端機的說明／回報用文字行，排在版本區塊之前（版本號維持最底下靠右，ui-24）；好友的位置優先，扣掉版本區塊剩不到 2 行就整塊不畫
+    const termVersionRows = termVersionBlock ? 2 + (termSections.length ? (isTermFull ? changelogRows(termSections, bodyColumns, pickerCells) : changelogRows(termSections, bodyColumns)) : 0) : 0
+    const termLinkLines = termRoom - termVersionRows >= 2 ? (
+      <Box key="term-links" flexDirection="column">
+        <Text dimColor wrap="truncate-end">{s.guideLineTerminal(GUIDE_URL)}</Text>
+        <Text dimColor wrap="truncate-end">{s.reportLineTerminal(REPORT_URL)}</Text>
+      </Box>
+    ) : null
     const room = e.props.scroll ? Math.max(1, e.props.scroll.bodyRows - headerRows) : terminalFriends.length
     const shown = terminalFriends.length > room ? terminalFriends.slice(0, Math.max(0, room - 1)) : terminalFriends
     const hiddenCount = terminalFriends.length - shown.length
@@ -1956,7 +2145,7 @@ export const register: Register = on => {
           {/* ui-26：終端機按鈕列只留 4 個（5 個在英文約 79 欄會擠爆），換頭像用 /friends avatar；好友的頭像照樣畫在名字前（表情符號） */}
           {leaveButton}
         </Box>
-        <Box flexDirection="row" gap={1}>{nameButton}</Box>
+        <Box flexDirection="row" gap={1}>{nameButton}{diagButton}</Box>
         <Box flexDirection="column" marginTop={1}>
           {sorted.length === 0 && <Text dimColor>{s.loading}</Text>}
           {isAlone && <Text dimColor>{s.alone}</Text>}
@@ -1980,6 +2169,7 @@ export const register: Register = on => {
           {hiddenCount > 0 && <Text dimColor>{s.more(hiddenCount)}</Text>}
           {isTermDemo && demoCard('demo-term', 'hide-demo-term', false)}
         </Box>
+        {termLinkLines}
         {termVersionBlock}
       </Box>
     )

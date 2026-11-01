@@ -71,7 +71,10 @@ export default {
         return await json(200, await statsOf(env).statsView(now))
       }
       if (request.method === 'POST' && !core.isJsonType(request.headers.get('content-type'))) return await json(415, { error: '要 application/json' })
-      const b = request.method === 'POST' ? await readBody(request) : {}
+      // 內文太大或不是合法 JSON 才是 400；其他內部例外（storage、Durable Object 重置…）在最外層回 503。
+      // 外掛會把「帶 pauseSeq 的請求收到 400」當成中繼不認得這個欄位，暫時性的內部錯誤不能冒充成 400
+      let b
+      try { b = request.method === 'POST' ? await readBody(request) : {} } catch { return await json(400, { error: '請求格式錯誤' }) }
       // ver-2c：X-Friends-Version 經 clientVersion 過濾（格式不對、沒帶＝空字串），存進成員資料，不放進回應
       const ver = core.clientVersion(request.headers.get('x-friends-version'))
       if (route === 'POST /groups') {
@@ -118,13 +121,18 @@ export default {
       const a = core.parseAuth(request.headers.get('authorization'))
       if (!a || !core.GROUP_ID_RE.test(a.groupId)) return await json(401, { error: '金鑰無效' })
       return await json(...(await groupOf(env, a.groupId).authed(route, a, b, ip, ver, opsEnabled(env), now)))
-    } catch {
-      try { return await json(400, { error: '請求格式錯誤' }) } catch {
+    } catch (error) {
+      console.error('relay internal error', error?.name) // 只記錯誤種類，不記內容
+      try { return await json(...SAVE_FAILED) } catch {
         return new Response('{"error":"response signing unavailable"}', { status: 503, headers: { 'content-type': 'application/json; charset=utf-8' } })
       }
     }
   },
 }
+
+// 存檔失敗（Durable Object 的 storage 丟錯）：回 500 讓外掛稍後重試。不要混成 400（外掛會把 400 當成「中繼不認得這個欄位」而退讓），
+// 也不要用 503（外掛把 503 顯示成「公開中繼已滿，請自己架一個」）
+const SAVE_FAILED = [500, { error: '存檔暫時失敗，請稍後再試' }]
 
 const AUTHED = new Set(['POST /status', 'GET /friends', 'POST /invite/rotate', 'POST /kick', 'POST /name', 'POST /leave'])
 
@@ -137,13 +145,33 @@ export class Group extends DurableObject {
     this.ttl = Number(env.ACTIVITY_TTL_MS) || core.ACTIVITY_TTL_MS
     this.env = env
     this.ops = undefined
+    // 記憶體裡有還沒寫進資料庫的「暫停」（暫停那一次存檔失敗，記憶體保留暫停以免好友看到動態）：記是哪幾位成員。之後每個請求都先補存
+    this.unsavedBy = new Set()
+    this.tail = Promise.resolve()
+    this.alarmDirty = false // 存檔時排到期鬧鐘失敗過（存檔本身成功）：之後的請求再排
+  }
+
+  // 一次只處理一個 join／authed／alarm。這幾個方法在 await（雜湊、存檔）的空檔會讓別的請求插進來；
+  // 存檔失敗時要把記憶體還原成「這個請求開始前」，中間插進來並且已成功存檔的變更會被一起抹掉（盲審必修 2）
+  async serial(fn) {
+    const prev = this.tail
+    let release
+    this.tail = new Promise(resolve => { release = resolve })
+    await prev
+    try { return await fn() } finally { release() }
   }
 
   // 動態到期：沒人來讀也會叫醒這個 Durable Object 清掉（sec-3）
-  async alarm() {
+  alarm() { return this.serial(() => this.alarmNow()) }
+
+  async alarmNow() {
     const g = await this.load()
     if (g && core.expireActivity(g, Date.now(), this.ttl)) await this.persist()
     else if (g) await this.scheduleExpiry()
+    if (this.alarmDirty) {
+      await this.scheduleExpiry() // 這裡失敗就丟錯，讓 Cloudflare 重試這次 alarm
+      this.alarmDirty = false
+    }
   }
 
   async scheduleExpiry() {
@@ -178,7 +206,36 @@ export class Group extends DurableObject {
     const values = { group: { ...this.g, members } }
     if (this.ops) values.ops = this.ops
     await this.ctx.storage.put(values)
-    await this.scheduleExpiry()
+    this.unsavedBy.clear()
+    // put 成功才算存好；排鬧鐘失敗不能讓呼叫端以為存檔失敗而還原記憶體（那會讓記憶體落後資料庫）。
+    // 鬧鐘沒排成的後果只是動態晚點清，下一個請求會再清、再排
+    try {
+      await this.scheduleExpiry()
+      this.alarmDirty = false
+    } catch { this.alarmDirty = true }
+  }
+
+  // 存檔失敗時還原用：只含會存進資料庫的欄位。conns（在線狀態）只放記憶體，不複製、也不還原（心跳是真的收到了）
+  snapshot() {
+    const { members, ...rest } = this.g
+    return {
+      rest: structuredClone(rest),
+      members: Object.fromEntries(Object.entries(members).map(([id, { conns, ...m }]) => [id, { m: structuredClone(m), conns }])),
+    }
+  }
+
+  // 保持同一個物件（authed 手上的 g、mem 參照不會失效），內容還原成 snapshot 當時的樣子
+  restore(snap) {
+    // 成員物件原地還原（不換新物件）：core 裡以成員物件為鍵的狀態（版本寫入頻率）才不會失效
+    const old = this.g.members
+    const members = {}
+    for (const [id, { m, conns }] of Object.entries(snap.members)) {
+      const cur = old[id]
+      if (cur) for (const key of Object.keys(cur)) if (key !== 'conns') delete cur[key]
+      members[id] = Object.assign(cur ?? { conns }, structuredClone(m))
+    }
+    for (const key of Object.keys(this.g)) delete this.g[key]
+    Object.assign(this.g, structuredClone(snap.rest), { members })
   }
 
   async init(groupId, g, trackOps = false, now = Date.now()) {
@@ -194,25 +251,37 @@ export class Group extends DurableObject {
     if (trackOps) await this.flushOps(groupId, now, true)
   }
 
-  async join(groupId, b, ip, ver, trackOps = false, now = Date.now()) {
+  join(...args) { return this.serial(() => this.joinNow(...args)) }
+
+  async joinNow(groupId, b, ip, ver, trackOps = false, now = Date.now()) {
     if (this.limited('join:' + ip, 10, 3_600_000)) return [429, { error: '嘗試太多次，一小時後再試' }]
     const g = await this.load()
+    const snap = g ? this.snapshot() : null
     const r = await core.join(g, groupId, b, now, ver)
     if (r[0] === 200) {
       if (trackOps) {
         this.ops ??= newGroupOps(now)
         recordMembershipRequest(this.ops, g.members, g.members[r[1].memberId], now)
       }
-      await this.persist()
+      // 存檔失敗：把剛加進記憶體的成員拿掉（加入的人拿不到金鑰，留著只會變幽靈成員佔名額），回 503 讓他重試
+      try { await this.persist() } catch {
+        this.restore(snap)
+        return SAVE_FAILED
+      }
       if (trackOps) await this.flushOps(groupId, now, true)
     }
     return r
   }
 
-  async authed(route, a, b, ip, ver, trackOps = false, now = Date.now()) {
+  authed(...args) { return this.serial(() => this.authedNow(...args)) }
+
+  async authedNow(route, a, b, ip, ver, trackOps = false, now = Date.now()) {
     const g = await this.load()
     const mem = await core.findMember(g, a.memberId, a.key)
     if (!mem) return [401, { error: '金鑰無效' }]
+    // 上一個請求的暫停存檔失敗、記憶體先暫停了：這個請求順便補存（不論是誰送來的）
+    if (this.unsavedBy.size) try { await this.persist() } catch {}
+    if (this.alarmDirty) try { await this.scheduleExpiry(); this.alarmDirty = false } catch {}
     // 名字格式先在入口驗；IP 額度只讓通過 member key 的請求消耗，跟 Node 順序一致。
     if (route === 'POST /name' && limited('rename:' + ip, core.RENAME_GLOBAL_MAX, core.RENAME_GLOBAL_WINDOW_MS, now))
       return [429, { error: '改名太頻繁' }]
@@ -230,31 +299,51 @@ export class Group extends DurableObject {
       await this.persist()
       saved = true
     }
+    // 0.5.8：先存檔成功，記憶體才算數。路由已經在記憶體改了東西、存檔卻失敗 → 還原成這個請求開始前的樣子（跟資料庫一致），
+    // 回 503 讓外掛重試。以前記憶體改了、資料庫沒改：之後 Durable Object 被回收，旗標會倒回舊值（暫停被悄悄解除或恢復又變回暫停）
+    const snap = this.snapshot()
+    const failed = () => {
+      this.restore(snap)
+      return SAVE_FAILED
+    }
     try {
       if (route === 'POST /status') {
+        const wasPaused = mem.paused === true
         const [code, obj, isDirty] = core.status(g, a.memberId, mem, b, now, ver)
-        if (isDirty) await save()
+        if (isDirty) {
+          try { await save() } catch {
+            // 暫停是例外：隱私承諾比一致性重要，記憶體維持「已暫停」（好友只看得到在線），等補存；其他一律還原
+            if (mem.paused === true && !wasPaused) {
+              try { await save(); return [code, obj] } catch {} // 先立刻再試一次（短暫失敗）；還是不行才留著等補存
+              this.unsavedBy.add(a.memberId)
+              return SAVE_FAILED
+            }
+            return failed()
+          }
+        } else if (code === 200 && this.unsavedBy.has(a.memberId)) return SAVE_FAILED // 200＝已經寫進資料庫；只有這位成員的暫停還沒存好才回 503，別人的心跳照常
         return [code, obj]
       }
       if (route === 'GET /friends') return [200, core.friendsView(g, a.memberId, now)]
       if (route === 'POST /invite/rotate' || route === 'POST /kick') {
         const r = route === 'POST /kick' ? await core.kick(g, a.groupId, a.memberId, b) : await core.rotateInvite(g, a.groupId, a.memberId)
-        if (r[0] === 200) await save()
+        if (r[0] === 200) try { await save() } catch { return failed() }
         return r
       }
       if (route === 'POST /name') {
         const r = core.rename(mem, b, now)
-        if (r[0] === 200) await save()
+        if (r[0] === 200) try { await save() } catch { return failed() }
         return r
       }
       // POST /leave：群組空了整組刪（sec-3）
       const { reply, isEmpty } = core.leave(g, a.memberId)
-      if (isEmpty) {
-        await this.ctx.storage.deleteAlarm()
-        await this.ctx.storage.deleteAll()
-        this.g = null
-        saved = true // 整組都刪了，沒有東西要補存
-      } else await save()
+      try {
+        if (isEmpty) {
+          await this.ctx.storage.deleteAlarm()
+          await this.ctx.storage.deleteAll()
+          this.g = null
+          saved = true // 整組都刪了，沒有東西要補存
+        } else await save()
+      } catch { return failed() }
       return reply
     } finally {
       // 順便要存的（過期動態、版本）一律在這裡補存一次（fix-7／fix-8）：路由自己沒存成功（沒有要存、非 200 的回應、或丟了例外）都算；

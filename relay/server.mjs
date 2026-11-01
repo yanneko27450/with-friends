@@ -250,11 +250,14 @@ const server = http.createServer(async (req, res) => {
     const route = routes[`${req.method} ${path}`]
     if (!route) return await send(404, { error: 'not found' })
     if (req.method === 'POST' && !core.isJsonType(req.headers['content-type'])) return await send(415, { error: '要 application/json' })
-    const b = req.method === 'POST' ? await body(req) : {}
+    // 內文太大或不是合法 JSON 才是 400；路由裡其他例外（存檔失敗…）回 500。
+    // 外掛把「帶 pauseSeq 的請求收到 400」當成中繼不認得這個欄位，暫時性的內部錯誤不能冒充成 400
+    let b
+    try { b = req.method === 'POST' ? await body(req) : {} } catch { return await send(400, { error: '請求格式錯誤' }) }
     const [code, obj] = await route(req, b, ip)
     await send(code, obj)
   } catch (err) {
-    if (!res.headersSent) await send(400, { error: '請求格式錯誤' })
+    if (!res.headersSent) await send(500, { error: '中繼暫時出錯，請稍後再試' })
   }
 })
 

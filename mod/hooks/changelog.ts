@@ -14,6 +14,22 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    version: '0.6.2',
+    date: '2026-11-06',
+    items: {
+      'zh-TW': [
+        '修好聊天分頁一直顯示「聊天正在另一個 Claude 對話裡運作」：現在由開著面板的對話負責聊天。',
+        '背景對話不再把聊天佔住。',
+        '兩個對話都開著面板時，先開的那個負責。',
+      ],
+      en: [
+        'Fixed the chat tab saying chat is running in another conversation: the conversation where the Friends panel is open now handles chat.',
+        'Background conversations no longer hold the chat.',
+        'If two conversations both have the Friends panel open, the first one keeps it.',
+      ],
+    },
+  },
+  {
     version: '0.6.0',
     date: '2026-11-05',
     items: {

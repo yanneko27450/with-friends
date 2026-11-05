@@ -66,6 +66,8 @@ let lastNoticeAt = -Infinity
 let holdsLease = false
 /** 本機記的租約到期時間（引擎時鐘）：快到期就當沒有，重新確認 */
 let leaseUntil = 0
+/** 上次寫進租約的「面板開著嗎」；變了就提早重寫，別人才知道能不能接手 */
+let leasePane = false
 let sendBusy = false
 /** 這個外掛自己的版本（register.tsx 讀 plugin.json 後交過來；讀不到＝''，請求就不帶 x-friends-version） */
 let chatVersion = ''
@@ -310,15 +312,19 @@ async function gateFor($: EngineInterface, m: Membership): Promise<ChatGate> {
 
 // ---- 誰負責聊天 ----
 
-async function claimLease($: EngineInterface): Promise<boolean> {
+async function claimLease($: EngineInterface, paneOpen: boolean): Promise<boolean> {
   const now = clockNow()
-  const cur = (await $.store.get(LEASE_KEY)) as { conn?: unknown; until?: unknown } | undefined
-  if (cur && typeof cur.until === 'number' && cur.until > now && cur.conn !== conn) return false
-  await $.store.set(LEASE_KEY, { conn, until: now + LEASE_MS })
+  const cur = (await $.store.get(LEASE_KEY)) as { conn?: unknown; until?: unknown; pane?: unknown } | undefined
+  if (cur && typeof cur.until === 'number' && cur.until > now && cur.conn !== conn) {
+    // 面板開著的對話優先：現任沒開面板（背景對話）就接手；現任也開著面板，先到先得
+    if (!paneOpen || cur.pane === true) return false
+  }
+  await $.store.set(LEASE_KEY, { conn, until: now + LEASE_MS, pane: paneOpen })
   // 兩個對話同時搶時各自寫一次、最後寫的贏：寫完再讀回來，確認留下來的是自己的
   const back = (await $.store.get(LEASE_KEY)) as { conn?: unknown } | undefined
   if (back?.conn !== conn) return false
   leaseUntil = now + LEASE_MS
+  leasePane = paneOpen
   return true
 }
 
@@ -353,9 +359,9 @@ async function chatTick($: EngineInterface, force = false): Promise<void> {
     let gate = await gateFor($, m)
     if (c.hasSession) {
       // 不論閘門是什麼狀態都要確認租約：沒有租約的對話不能寫保管庫（閘門關著時一樣會做到期清除、一樣會想存檔）
-      if (!holdsLease || leaseUntil - clockNow() < LEASE_MS / 2) {
+      if (!holdsLease || leasePane !== isChatPaneOpen || leaseUntil - clockNow() < LEASE_MS / 2) {
         const had = holdsLease
-        holdsLease = await claimLease($)
+        holdsLease = await claimLease($, isChatPaneOpen)
         // 剛拿到租約：別的對話可能已經改過保管庫，記憶體裡的是舊的，重讀
         if (holdsLease && !had) await c.reload()
       }

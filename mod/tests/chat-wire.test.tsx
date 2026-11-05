@@ -19,11 +19,12 @@ const ATOM = { plugin: 'with-friends', key: 'chat' } as const
 const SURFACES = ['desktop', 'mobile', 'terminal'] as const
 const EN = (key: keyof typeof WIRE_STRINGS.en) => WIRE_STRINGS.en[key]
 
-type Setup = { capability?: Capability; membership?: boolean; vault?: boolean; aliceHasList?: boolean; chatDisabled?: boolean; badChatSignature?: boolean; leaseElsewhere?: boolean }
+type Setup = { capability?: Capability; membership?: boolean; vault?: boolean; aliceHasList?: boolean; chatDisabled?: boolean; badChatSignature?: boolean; leaseElsewhere?: boolean; leaseBackground?: boolean }
 function setup(on: On, s: Setup = {}) {
   const store: Record<string, unknown> = { relay: ORIGIN, relayTrustV1: TRUST, lang: 'en', onboarded: true }
   if (s.membership !== false) store.membership = MEMBERSHIP
-  if (s.leaseElsewhere) store.chatLeaseV1 = { conn: 'another-conversation', until: Date.now() + 3_600_000 }
+  if (s.leaseElsewhere) store.chatLeaseV1 = { conn: 'another-conversation', until: Date.now() + 3_600_000, pane: true }
+  if (s.leaseBackground) store.chatLeaseV1 = { conn: 'background-conversation', until: Date.now() + 3_600_000, pane: false }
   if (s.vault !== false) store.chatVaultV1 = bobVault({ aliceList: s.aliceHasList !== false })
   const w = isoWorld(on, { store, atom: ATOM, renderId: 'friends-chat', now: Date.now() })
   const state: RelayState = { ...newRelayState(), capability: s.capability ?? 'ok', aliceHasList: s.aliceHasList ?? true, chatDisabled: s.chatDisabled ?? false, badChatSignature: s.badChatSignature ?? false }
@@ -74,6 +75,35 @@ for (const [name, s, text] of [
     if ('membership' in s) expect(state.paths.includes('/capability'), '沒加入群組連 /capability 都不問').toBe(false)
   })
 }
+
+// ---- 租約：面板開著的對話優先，背景對話不能把聊天佔住 ----
+
+test('租約在沒開面板的背景對話手上：面板開著的對話接手租約並顯示聊天（0.6.2）', async ($, on) => {
+  const { w, state } = setup(on, { leaseBackground: true })
+  await start($)
+  await w.clock.advance(16_000)
+  await w.clock.settle()
+  const ui = await mount($, w, 'desktop')
+  await w.clock.advance(16_000)
+  await w.clock.settle()
+  await ui.redraw()
+  const shown = await textOf(ui)
+  expect(shown).not.toContain(EN('otherSession'))
+  expect(await ui.find({ type: 'Input' }), '有輸入框').toBeDefined()
+  expect(chatPaths(state).length, '接手後開始碰聊天路由').toBeGreaterThan(0)
+  await ui.unmount()
+})
+
+test('租約在面板也開著的另一個對話手上：不搶，維持顯示「另一個對話」（先到先得）', async ($, on) => {
+  const { w } = setup(on, { leaseElsewhere: true })
+  await start($)
+  const ui = await mount($, w, 'desktop')
+  await w.clock.advance(16_000)
+  await w.clock.settle()
+  await ui.redraw()
+  expect(await textOf(ui)).toContain(EN('otherSession'))
+  await ui.unmount()
+})
 
 // ---- 顯示聊天：三種介面 ----
 

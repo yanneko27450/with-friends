@@ -9,6 +9,7 @@ import { ACTION_LABEL, ACTIONS, activityText, AVATARS, SUBJECT_LABEL, SUBJECTS }
 import { activityOf, AUTO_MAX_TRIES, AUTO_RETRY_MS, classifyActivity, DEFAULT_RELAY, errorText, friendsFrom, inviteLink, isHiddenDir, isNewer, isValidRelayResponse, langOf, marketplaceUrl, membershipFrom, parseInvite, RelayError, relayOrigin, statusBody, statusText, SUBCOMMANDS, UPDATE_CHECK_MS, WHATS_NEW_MS, whatsNewVersions, membershipOf, isSecureRelay, removeMember, removeWho } from '../hooks/register'
 import { SOURCE_URL, STRINGS } from '../hooks/i18n'
 import { DEMO_BOT_SHOW_BELOW } from '../hooks/demo-bot'
+import { BUSY_STRINGS, busyLine } from '../hooks/friend-busy'
 import { cellWidth, CHANGELOG, changelogRows, PICKER_CHROME } from '../hooks/changelog'
 import { cleanName, isValidNameInput } from '../hooks/text'
 import { redact, RULES } from '../hooks/redact'
@@ -38,6 +39,8 @@ type Setup = {
   fail?: Record<string, number>
   /** 模擬舊版中繼：送狀態帶 version 就回 400 */
   oldRelay?: boolean
+  /** 0.6.0：送狀態的回應多帶的欄位（模擬中繼回報自己的 paused／pauseSeq），依這次送來的內容決定 */
+  statusExtra?: (body: any) => Record<string, unknown>
   /** 0.5.8：模擬還不認得 pauseSeq 的中繼（0.5.7 以前或自架）：送狀態帶 pauseSeq 就回 400 */
   noPauseSeqRelay?: boolean
   /** 0.5.8：前 N 個帶 pauseSeq 的送狀態請求回 400（暫時性錯誤被當成不認得欄位），之後恢復正常 */
@@ -277,7 +280,7 @@ function world(on: On, s: Setup = {}) {
     if (url.pathname === '/join') return signed({ ...MEMBERSHIP, relay: 'http://evil.test', memberId: 'm2', memberKey: 'k2', isOwner: false })
     const defaultRoster = () => s.friends ?? [{ ...ME_ROW, isOwner: (shared.membership as any)?.isOwner === true }]
     if (url.pathname === '/friends') return signed({ groupName: 'Study group', members: defaultRoster() })
-    if (url.pathname === '/status') return signed({ ok: true, groupName: 'Study group', members: defaultRoster() })
+    if (url.pathname === '/status') return signed({ ok: true, groupName: 'Study group', members: defaultRoster(), ...(s.statusExtra?.(body) ?? {}) })
     if (url.pathname === '/kick') return signed({ ok: true, invite: 'g1-afterkick', inviteGeneration: 1 })
     if (url.pathname === '/name') return signed({ ok: true })
     return signed({ ok: true })
@@ -922,7 +925,7 @@ test('pane：好友動態用看的人的語言顯示代碼，名字只畫在 pan
     if (surface === 'terminal') expect(await ui.find({ type: 'Text', text: 'Fixing bugs · a website' }), `${surface} 動態`).toBeDefined()
     else {
       expect(await ui.find({ type: 'Text', text: 'Fixing bugs' }), `${surface} 動作`).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: 'a website · Working' }), `${surface} 類別·狀態`).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: 'a website · Busy · 2 min' }), `${surface} 類別·在忙·多久`).toBeDefined()
     }
     // 比我新的版本送來的未知代碼 → 顯示成 other，不顯示原字串
     expect(await ui.find({ type: 'Text', text: /future-code/ }), `${surface} 未知代碼`).toBeUndefined()
@@ -1884,7 +1887,7 @@ test('ui-26／ui-15：換頭像鈕只在桌面／手機；終端機主要列維�
     const ui = await mountPane($, surface)
     if (surface === 'terminal') {
       expect(await ui.find({ type: 'Button', key: 'avatar' }), surface).toBeUndefined()
-      expect((await ui.findAll({ type: 'Button' })).map((b: any) => b.key).filter((k: string) => k !== 'lang' && k !== 'whatsnew')).toEqual(['pause', 'invite', 'refresh', 'leave', 'name', 'diag', 'remove-term-f1', 'hide-demo-term'])
+      expect((await ui.findAll({ type: 'Button' })).map((b: any) => b.key).filter((k: string) => k !== 'lang' && k !== 'whatsnew')).toEqual(['pause', 'invite', 'refresh', 'leave', 'name', 'diag', 'chat-open', 'remove-term-f1', 'hide-demo-term'])
     } else {
       expect(await ui.find({ type: 'Button', key: 'avatar' }), surface).toBeDefined()
     }
@@ -2235,9 +2238,10 @@ test('pane（桌面／手機）：標題、三行動態卡、離線灰框、自�
     expect(await ui.find({ type: 'Text', text: 'Friends' }), `${surface} 標題`).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Study group · 2 friends online' }), `${surface} 群組名·在線數`).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^Fixing bugs$/ }), `${surface} Bob 動作（只有動作，類別在下一行）`).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '2m ago' }), `${surface} 時間在名字右邊`).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'a website · Working' }), `${surface} Bob 類別·狀態`).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'an AI agent · Idle' }), `${surface} Cat 閒置`).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '2m ago' }), `${surface} 右上角不再畫時間`).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: '30s ago' }), `${surface} 閒置好友右上角也沒有時間`).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'a website · Busy · 2 min' }), `${surface} Bob 類別·在忙·多久`).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'an AI agent · Idle' }), `${surface} Cat 閒置（沒有時間）`).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'You · Me' }), `${surface} 你`).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Offline · 1' }), `${surface} 離線框標題`).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'last online 16m ago' }), `${surface} 多久前在線`).toBeDefined()
@@ -2250,8 +2254,8 @@ test('pane（桌面／手機）：標題、三行動態卡、離線灰框、自�
   await $.command.run({ command: 'friends', args: 'lang zh-TW', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
   const ui = await $.ui.mount({ plugin: 'with-friends', surface: 'desktop', component: 'Pane', requestId: 'friends', props: PANE_PROPS })
   expect(await ui.find({ type: 'Text', text: '好友動態' }), '繁中標題').toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '網站 · 工作中' }), '繁中類別·狀態').toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '2 分鐘前' }), '繁中時間').toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '網站 · 在忙 · 2 分鐘' }), '繁中類別·在忙·多久').toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '2 分鐘前' }), '繁中右上角不再畫時間').toBeUndefined()
   expect(await ui.find({ type: 'Text', text: '離線 · 1 位' }), '繁中離線框').toBeDefined()
   expect(await ui.find({ type: 'Text', text: '16 分鐘前在線' }), '繁中多久前在線').toBeDefined()
   await ui.unmount()
@@ -3005,9 +3009,9 @@ test('0.5.8：舊中繼一直 400 序號 → 連續退讓 3 次後「繼續」�
 test('0.5.8：paused 已是繼續、pauseState 還是舊的暫停（別人按到一半）→ 不送「繼續」（不帶舊序號送出去被忽略還清掉記號）；吻合後帶新序號送', async ($, on) => {
   const w: any = world(on, { store: { membership: MEMBERSHIP, paused: false, pauseState: { paused: true, seq: 500 }, resumePending: 'tok-1' } })
   await start($)
-  await w.clock.advance(30_000)
+  await w.clock.advance(10_000)
   await w.clock.settle()
-  expect(statuses(w.sent).filter(b => b.paused === false), '不吻合時不送繼續').toHaveLength(0)
+  expect(statuses(w.sent).filter(b => b.paused === false), '不吻合時不送繼續（持續不到 15 秒）').toHaveLength(0)
   expect(w.shared.resumePending).toBe('tok-1')
   w.shared.pauseState = { paused: false, seq: 600 }
   await w.clock.advance(30_000)
@@ -3042,6 +3046,117 @@ for (const status of [409, 500]) test(`0.5.8：帶序號的繼續收到 ${status
   await w.clock.settle()
   expect(w.shared.resumePending).toBeUndefined()
   for (const b of statuses(w.sent).filter(b => b.paused === false)) expect(b.pauseSeq).toBe(200)
+})
+
+// ---- 0.6.0：中繼的 /status 回應帶自己的 paused／pauseSeq ----
+test('0.6.0：「繼續」要中繼確認過才算送達：中繼回應仍是暫停（序號更舊）→ 記號留著、照舊序號重送；中繼回報已繼續且序號跟上 → 才清', async ($, on) => {
+  let relay = { paused: true, pauseSeq: 100 }
+  const w: any = world(on, { store: { membership: MEMBERSHIP, paused: false, pauseState: { paused: false, seq: 200 }, resumePending: 'tok-1' }, statusExtra: () => ({ ...relay }) })
+  await start($)
+  await w.clock.advance(30_000)
+  await w.clock.settle()
+  expect(w.shared.resumePending, '中繼還在序號 100 的暫停：沒確認，記號留著').toBe('tok-1')
+  const resumes = statuses(w.sent).filter(b => b.paused === false)
+  expect(resumes.length).toBeGreaterThanOrEqual(2)
+  for (const b of resumes) expect(b.pauseSeq).toBe(200)
+  relay = { paused: false, pauseSeq: 200 }
+  await w.clock.advance(20_000)
+  await w.clock.settle()
+  expect(w.shared.resumePending).toBeUndefined()
+})
+
+test('0.6.0：「繼續」被中繼忽略（回應暫停且序號 ≥ 我的）→ 暫停優先，本機跟著中繼暫停、清掉繼續記號（不是以為已繼續）', async ($, on) => {
+  const w: any = world(on, { store: { membership: MEMBERSHIP, paused: false, pauseState: { paused: false, seq: 200 }, resumePending: 'tok-1' }, statusExtra: () => ({ paused: true, pauseSeq: 250 }) })
+  await start($)
+  await w.clock.advance(30_000)
+  await w.clock.settle()
+  expect(w.shared.paused).toBe(true)
+  expect(w.shared.pauseState).toEqual({ paused: true, seq: 250 })
+  expect(w.shared.resumePending).toBeUndefined()
+  expect(statuses(w.sent).at(-1)).toMatchObject({ paused: true, pauseSeq: 250 })
+})
+
+// 盲審必修 1：沒帶序號的暫停（0.5.7 以前的對話按的）不改序號 → 中繼回「暫停、序號＝我上次繼續的序號」，相同不代表比較新
+test('0.6.0：中繼暫停的序號和我的繼續相同（舊版對話沒帶序號的暫停）→ 不跟著暫停、記號留著；舊對話的繼續生效後（中繼已繼續）才清', async ($, on) => {
+  let relay = { paused: true, pauseSeq: 200 }
+  const w: any = world(on, { store: { membership: MEMBERSHIP, paused: false, pauseState: { paused: false, seq: 200 }, resumePending: 'tok-1' }, statusExtra: () => ({ ...relay }) })
+  await start($)
+  await w.clock.advance(30_000)
+  await w.clock.settle()
+  expect(w.shared.paused, '使用者按的繼續不能被改回暫停').toBe(false)
+  expect(w.shared.pauseState).toEqual({ paused: false, seq: 200 })
+  expect(w.shared.resumePending).toBe('tok-1')
+  relay = { paused: false, pauseSeq: 200 } // 舊對話自己的（沒序號的）繼續生效了
+  await w.clock.advance(20_000)
+  await w.clock.settle()
+  expect(w.shared.resumePending).toBeUndefined()
+  expect(w.shared.paused).toBe(false)
+})
+
+test('0.6.0：不吻合超過 15 秒、本機是繼續、中繼還是暫停、沒有任何繼續記號 → 也補送一次沒序號的繼續', async ($, on) => {
+  const w: any = world(on, { store: { membership: MEMBERSHIP, paused: false, pauseState: { paused: true, seq: 500 } }, statusExtra: b => (b.paused === false ? { paused: false, pauseSeq: 500 } : { paused: true, pauseSeq: 500 }) })
+  await start($)
+  await w.clock.advance(60_000)
+  await w.clock.settle()
+  const resumes = statuses(w.sent).filter(b => b.paused === false)
+  expect(resumes.length).toBeGreaterThanOrEqual(1)
+  for (const b of resumes) expect(b.pauseSeq).toBeUndefined()
+})
+
+test('0.6.0：中繼一直不接受我的暫停（回報已繼續、序號永遠比我的大）→ 序號最多加 3 次，不會每輪都加', async ($, on) => {
+  let n = 1000
+  const w: any = world(on, { store: { membership: MEMBERSHIP, paused: true, pauseState: { paused: true, seq: 300 } }, statusExtra: () => ({ paused: false, pauseSeq: (n += 1000) }) })
+  await start($)
+  await w.clock.advance(120_000)
+  await w.clock.settle()
+  const bumped = statuses(w.sent).filter(b => b.paused === true && typeof b.pauseSeq === 'number' && b.pauseSeq > 1000)
+  const distinct = new Set(bumped.map(b => b.pauseSeq))
+  expect(distinct.size, '有加序號（不是完全沒反應）').toBeGreaterThanOrEqual(1)
+  expect(distinct.size, '最多加 3 次').toBeLessThanOrEqual(4)
+})
+
+test('0.6.0：本機暫停、中繼回報已繼續且序號 ≥ 我的（我的暫停被當舊的忽略）→ 序號加到比中繼大，當場再送一次暫停', async ($, on) => {
+  let relay = { paused: false, pauseSeq: 500 }
+  const w: any = world(on, { store: { membership: MEMBERSHIP, paused: true, pauseState: { paused: true, seq: 300 } }, statusExtra: b => (b.paused === true && b.pauseSeq > relay.pauseSeq ? (relay = { paused: true, pauseSeq: b.pauseSeq }) : relay) })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  const pauses = statuses(w.sent).filter(b => b.paused === true)
+  expect(pauses.some(b => b.pauseSeq === 501), '用比中繼大的序號（500+1）當場再送').toBe(true)
+  expect(w.shared.pauseState).toEqual({ paused: true, seq: 501 })
+  expect(relay).toEqual({ paused: true, pauseSeq: 501 })
+})
+
+test('0.6.0：isValidRelayResponse：/status 帶 paused／pauseSeq 要兩個一起且型別對；錯的整個回應不採用', () => {
+  const auth = { ...MEMBERSHIP }
+  const members = [{ ...ME_ROW }]
+  expect(isValidRelayResponse('/status', { members, paused: true, pauseSeq: 5 }, auth)).toBe(true)
+  expect(isValidRelayResponse('/status', { members }, auth)).toBe(true)
+  for (const bad of [{ paused: 'yes', pauseSeq: 5 }, { paused: true }, { pauseSeq: 5 }, { paused: true, pauseSeq: -1 }, { paused: true, pauseSeq: 1.5 }, { paused: true, pauseSeq: '5' }, { paused: null, pauseSeq: 0 }]) {
+    expect(isValidRelayResponse('/status', { members, ...bad }, auth), JSON.stringify(bad)).toBe(false)
+  }
+})
+
+test('0.6.0：舊中繼（回應沒有 paused／pauseSeq）→ 照 0.5.8：200 就算送達', async ($, on) => {
+  const w: any = world(on, { store: { membership: MEMBERSHIP, paused: false, pauseState: { paused: false, seq: 200 }, resumePending: 'tok-1' } })
+  await start($)
+  await w.clock.advance(20_000)
+  await w.clock.settle()
+  expect(w.shared.resumePending).toBeUndefined()
+})
+
+test('0.6.0：paused 和 pauseState 不吻合持續 15 秒以上（舊版對話只改了 paused）→ 改送沒序號的「繼續」，中繼確認後清記號；不到 15 秒不送', async ($, on) => {
+  const w: any = world(on, { store: { membership: MEMBERSHIP, paused: false, pauseState: { paused: true, seq: 500 }, resumePending: 'tok-1' }, statusExtra: b => (b.paused === false ? { paused: false, pauseSeq: 500 } : { paused: true, pauseSeq: 500 }) })
+  await start($)
+  await w.clock.advance(10_000)
+  await w.clock.settle()
+  expect(statuses(w.sent).filter(b => b.paused === false)).toHaveLength(0)
+  await w.clock.advance(20_000)
+  await w.clock.settle()
+  const resumes = statuses(w.sent).filter(b => b.paused === false)
+  expect(resumes.length).toBeGreaterThanOrEqual(1)
+  for (const b of resumes) expect(b.pauseSeq).toBeUndefined()
+  expect(w.shared.resumePending).toBeUndefined()
 })
 
 test('多對話：pane 的「好友看到的你」用中繼上自己那一筆，不是這個對話的分類（ui-1d）', async ($, on) => {
@@ -5454,7 +5569,11 @@ test('perf-1：每一條遮罩規則單獨跑 10 萬字（不先截斷）也在 
 // perf-3：狀態沒變時不寫 $.store、不重送同樣的動態；pane 關著不比開著更常打中繼。數字寫在 team/reports/perf-3.md
 const PERF3_FRIENDS = [{ id: 'm1', name: 'Me', isMe: true, isOwner: true, presence: 'idle', action: '', subject: '', activityAgoSec: null, seenAgoSec: 1 }]
 const perMinute = (w: any, from: number, minutes: number) => {
-  const reqs = w.sent.slice(from).filter((r: any) => r.origin === 'https://relay.test')
+  // CHAT-4W：聊天的 GET /capability（中繼支不支援聊天）另外算：相容的 10 分鐘問一次（過一半 ttl 再問），不相容或看不懂的 5 分鐘問一次——這個測試的假中繼回的不是約定格式，所以是 5 分鐘一次
+  const all = w.sent.slice(from).filter((r: any) => r.origin === 'https://relay.test')
+  const probes = all.filter((r: any) => r.path === '/capability')
+  expect(probes.length / minutes, '聊天的 /capability 探測最多每 5 分鐘一次').toBeLessThanOrEqual(0.2 + 1e-9)
+  const reqs = all.filter((r: any) => r.path !== '/capability')
   return { requests: reqs.length / minutes, statuses: reqs.filter((r: any) => r.path === '/status').length / minutes, withActivity: reqs.filter((r: any) => r.body?.action !== undefined).length }
 }
 test('perf-3：pane 沒開的對話，狀態沒變的 10 分鐘：每分鐘 1 次心跳、不寫 $.store，不比開著勤', async ($, on) => {
@@ -5547,13 +5666,13 @@ for (const lang of ['en', 'zh-TW'] as const) {
       expect(String(x.props.source), alt).toContain(`<title>${alt.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</title>`)
     }
     // 三種狀態都有看得到的文字（不只靠點的顏色）
-    expect(await ui.find({ type: 'Text', text: new RegExp(`${s.presence.working}`) }), '工作中').toBeDefined()
+    expect(await ui.find({ type: 'Text', text: new RegExp(`${busyLine('working', true, 60, lang)}`) }), '在忙（working 改寫成 busyLine）').toBeDefined()
     expect(await ui.find({ type: 'Text', text: new RegExp(`${s.presence.idle}`) }), '閒置').toBeDefined()
     expect(await ui.find({ type: 'Text', text: s.offlineTitle(1) }), '離線').toBeDefined()
     await ui.unmount()
     // 終端機沒有圖，狀態直接寫成字
     const term = await mountPane($, 'terminal')
-    for (const p of ['working', 'idle', 'offline'] as const) expect(await term.find({ type: 'Text', text: s.presence[p] }), `terminal ${p}`).toBeDefined()
+    for (const p of ['working', 'idle', 'offline'] as const) expect(await term.find({ type: 'Text', text: p === 'working' ? busyLine('working', true, 60, lang)! : s.presence[p] }), `terminal ${p}`).toBeDefined()
     await term.unmount()
     await w.clock.advance(1_000)
   })
@@ -6059,7 +6178,7 @@ test('ui-29i：挑版本的寫入還沒回來時移焦點 → 不會留下提早
 // rel-058p：升到 0.5.8 的外掛：版本紀錄預設開在 0.5.8、舊版本都挑得到；中英條目數 3～5、一樣多、不帶卡號。
 // 日期已填 2026-11-01（部署日），changelog.ts、CHANGELOG.md、這裡三處要一起換
 test('rel-058p：0.5.8 的版本紀錄——預設 0.5.8、可以挑舊版本；條目給一般使用者看', async ($, on) => {
-  const top = CHANGELOG[0]!
+  const top = CHANGELOG.find(c => c.version === '0.5.8')!
   expect(top.version).toBe('0.5.8')
   for (const lang of ['en', 'zh-TW'] as const) {
     expect(top.items[lang].length, lang).toBeGreaterThanOrEqual(3)
@@ -6215,6 +6334,7 @@ for (const lang of ['en', 'zh-TW'] as const) {
       expect(await ui.find({ type: 'Text', text: STRINGS[lang].demoLabel }), `${surface} 有示範標示`).toBeDefined()
       expect(await ui.find({ type: 'Button', key: demoKey(surface) }), `${surface} 有隱藏鈕`).toBeDefined()
       expect(await ui.find({ type: 'Text', text: STRINGS[lang].presence.working }), `${surface} 機器人沒有「工作中」`).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: new RegExp(BUSY_STRINGS[lang].busy) }), `${surface} 機器人沒有「在忙」`).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: new RegExp(STRINGS[lang].online(0).replace(/[()]/g, '\$&')) }), `${surface} 在線人數不含機器人`).toBeDefined()
       expect(await ui.find({ type: 'Text', text: STRINGS[lang].alone }), `${surface} 仍顯示只有你一人`).toBeDefined()
       await ui.unmount()
@@ -6332,7 +6452,7 @@ test('R056f：所有問答框標題（ask*Header，中英）都在標題上限 1
 })
 
 // ---- 0.5.8 回報（B4-02）：說明／回報連結＋「出問題了」按鈕接到面板 ----
-import { buildDiagnostics } from '../hooks/diagnostics'
+import { buildDiagnostics, diagCopied } from '../hooks/diagnostics'
 import { GUIDE_URL, REPORT_URL, osFamilyOf } from '../hooks/register'
 
 for (const lang of ['en', 'zh-TW'] as const) {
@@ -6730,3 +6850,79 @@ test('0.5.8 更新原因：原因存不起來（store.set 丟錯）也不影響�
   expect(w.shared.updateFail).toBeUndefined()
   await ui.unmount()
 })
+
+// ---- C60-01（MR-41）：好友列的時間改放狀態那一行（「在忙 · 53 分鐘」），右上角不再畫時間 ----
+for (const lang of ['en', 'zh-TW'] as const) {
+  test(`C60-01：好友列第 3 行是「${lang === 'en' ? 'Busy · 53 min' : '在忙 · 53 分鐘'}」，右上角與終端機尾端都沒有時間；閒置沒有時間；離線的「last online」不變（${lang}）`, async ($, on) => {
+    const s = STRINGS[lang]
+    const friends = [
+      ME_ROW,
+      { ...BOB_ROW, activityAgoSec: 3180 },
+      { id: 'f2', name: 'Cat', isMe: false, isOwner: false, presence: 'idle', action: 'learning', subject: 'game', activityAgoSec: 30, seenAgoSec: 1 },
+      off('f3', 'Dan', 960),
+    ]
+    const w = world(on, { store: { membership: MEMBERSHIP, lang }, friends })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    const busy = busyLine('working', true, 3180, lang)!
+    expect(busy, '固定樣式').toBe(lang === 'en' ? 'Busy · 53 min' : '在忙 · 53 分鐘')
+    for (const surface of SURFACES) {
+      const ui = await mountPane($, surface)
+      const texts = (await ui.findAll({ type: 'Text' })).map((x: any) => String(x.text))
+      if (surface === 'terminal') expect(texts, `${surface} 狀態字`).toContain(busy)
+      else expect(texts, `${surface} 第 3 行`).toContain(`${SUBJECT_LABEL[lang].website} · ${busy}`)
+      // 在忙好友、閒置好友都不再有「N 分鐘前／Ns ago」這種單獨的時間字
+      expect(texts.filter((x: string) => /^\d+(s|m|h|d) ago$|^\d+ (秒|分鐘|小時|天)前$/.test(x)), `${surface} 沒有單獨的時間`).toEqual([])
+      expect(texts, `${surface} 閒置好友只有狀態字、沒有時間`).toContain(surface === 'terminal' ? s.presence.idle : `${SUBJECT_LABEL[lang].game} · ${s.presence.idle}`)
+      // 離線好友的「last online」不動
+      if (surface !== 'terminal') expect(texts, `${surface} 多久前在線`).toContain(s.lastSeen(lang === 'en' ? '16m ago' : '16 分鐘前'))
+      await ui.unmount()
+    }
+  })
+}
+
+// 「出問題了」複製成功的提示依身分分兩種下一句（群主、沒加入歸 other；已加入的成員才有邀請人可貼）
+for (const lang of ['en', 'zh-TW'] as const) {
+  test(`C60-01：「出問題了」複製成功的提示：群主看到 D2＋D4（${lang}）`, async ($, on) => {
+    const w = world(on, { store: { membership: { ...MEMBERSHIP, isOwner: true }, lang }, friends: [ME_ROW] })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    for (const surface of SURFACES) {
+      const ui = await mountPane($, surface)
+      await ui.press({ key: 'diag' })
+      expect(w.toasts.at(-1), `${surface} 群主`).toBe(diagCopied(lang, 'other'))
+      expect(w.toasts.at(-1)).not.toMatch(/invit|邀請/i)
+      await ui.unmount()
+    }
+  })
+
+  test(`C60-01：「出問題了」複製成功的提示：成員看到 D2＋D3（${lang}）`, async ($, on) => {
+    const self = { ...ME_ROW, isOwner: false }
+    const w = world(on, { store: { membership: { ...MEMBERSHIP, isOwner: false }, lang }, friends: [self] })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    for (const surface of SURFACES) {
+      const ui = await mountPane($, surface)
+      await ui.press({ key: 'diag' })
+      expect(w.toasts.at(-1), `${surface} 成員`).toBe(diagCopied(lang, 'member'))
+      expect(w.toasts.at(-1)).toMatch(lang === 'en' ? /invited you/ : /邀請你的朋友/)
+      await ui.unmount()
+    }
+  })
+
+  test(`C60-01：「出問題了」複製成功的提示：還沒加入看到 D2＋D4（${lang}）`, async ($, on) => {
+    const w = world(on, { store: { lang } })
+    await start($)
+    await w.clock.advance(10_000)
+    await w.clock.settle()
+    for (const surface of ['desktop', 'mobile'] as const) {
+      const ui = await mountPane($, surface)
+      await ui.press({ key: 'diag' })
+      expect(w.toasts.at(-1), `${surface} 沒加入`).toBe(diagCopied(lang, 'other'))
+      await ui.unmount()
+    }
+  })
+}

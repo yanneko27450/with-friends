@@ -19,6 +19,7 @@
       <a href="#data"><span class="zh">資料庫</span><span class="en">Data</span></a>
       <a href="#versions"><span class="zh">版本與更新</span><span class="en">Updates</span></a>
       <a href="#install"><span class="zh">安裝</span><span class="en">Install</span></a>
+      <a href="#chat"><span class="zh">聊天</span><span class="en">Chat</span></a>
     </nav>
     <button class="langbtn" id="langbtn" type="button"><span class="zh">English</span><span class="en">中文</span></button>
   </div>
@@ -101,8 +102,13 @@
       <p><span class="zh">開本機對話、把一段話傳給 Claude 讓它幫你裝，再把朋友的邀請貼進右邊的框。暫停、隱藏、退出隨時可以。</span><span class="en">Open a local conversation, send one paragraph so Claude installs it, then paste your friend's invite into the panel. Pause, hide or leave any time.</span></p>
       <span class="more"><span class="zh">三個步驟 ↓</span><span class="en">Three steps ↓</span></span>
     </a>
+    <a class="pcard db" href="#chat">
+    <div class="n"><span>05</span><span><span class="zh">預覽</span><span class="en">preview</span></span></div>
+    <h2><span class="zh">聊天</span><span class="en">Chat</span></h2>
+    <p><span class="zh">聊天還在預覽，先看這一章的限制。</span><span class="en">Chat is a preview. Read the limits in this chapter first.</span></p>
+    <span class="more"><span class="zh">看限制 ↓</span><span class="en">See the limits ↓</span></span></a>
     <a class="pcard later" href="#explore">
-      <div class="n"><span>05</span><span><span class="zh">規劃中</span><span class="en">planned</span></span></div>
+      <div class="n"><span>06</span><span><span class="zh">規劃中</span><span class="en">planned</span></span></div>
       <h2><span class="zh">探索群組</span><span class="en">Discover groups</span></h2>
             <p><span class="zh">之後也許能找到公開的群組。還沒做。</span><span class="en">Maybe one day: finding public groups. Not built.</span></p>
     </a>
@@ -162,7 +168,7 @@
             </li>
             <li>
               <span class="claim"><span class="zh">有流量上限，不容易灌爆</span><span class="en">Traffic limits make flooding harder</span></span>
-              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">每次請求最多 4 KB、一個群組最多 10 人；另外同一個 IP 每分鐘約 600 次、加入每小時約 10 次，這兩個是盡力而為（每台伺服器各算各的）</span><span class="en">Requests up to 4 KB and groups up to 10 people. On top of that, about 600 requests a minute per IP and 10 join attempts an hour, best effort (each server instance counts separately)</span></span>
+              <span><span class="k"><span class="zh">做法：</span><span class="en">How: </span></span><span class="zh">每次請求最多 4 KB、一個群組最多 5 人；另外同一個 IP 每分鐘約 600 次、加入每小時約 10 次，這兩個是盡力而為（每台伺服器各算各的）</span><span class="en">Requests up to 4 KB and groups up to 5 people. On top of that, about 600 requests a minute per IP and 10 join attempts an hour, best effort (each server instance counts separately)</span></span>
               <span class="ev"><span class="k"><span class="zh">證據：</span><span class="en">Evidence: </span></span><span class="zh">測試「第 11 人被拒」；其他上限還沒有專門的測試</span><span class="en">Test: 11th member rejected. The other limits don't have dedicated tests yet</span></span>
               <span><span class="tag part">◐ <span class="zh">部分做到</span><span class="en">Partly</span></span></span>
             </li>
@@ -379,6 +385,7 @@
       <div class="no">04</div>
       <div>
         <h2 id="h-inst"><span class="zh">安裝與移除</span><span class="en">Install and remove</span></h2>
+        <p class="measure muted"><span class="zh">這是 Claude Code 外掛，使用的人不用自己架中繼，官方中繼已經在運作。這頁說明的是 Code 版；之後的桌面小面板版會共用同一頁，到時再補它自己的安裝與邀請步驟。</span><span class="en">This is a Claude Code plugin; you do not need to run a relay yourself, the official one is already running. This page describes the Code version; the desktop mini-panel version will share this same page later and add its own install and invite steps.</span></p>
         <p class="measure muted"><span class="zh">需要電腦上的 Claude Code 2.1.295 以上：Claude 桌面版的 Code 分頁，或在終端機開 claude（桌面版更新到最新就好；不確定就打 <code>/status</code> 看）。只用 Chat（claude.ai 網頁、Chat 分頁、手機 App）的話先不用裝，等網頁版。</span><span class="en">Needs Claude Code 2.1.295 or newer on a computer: the Code tab of the Claude desktop app, or claude in a terminal (updating the desktop app is enough; type <code>/status</code> to check). If you only use Chat (claude.ai, the Chat tab, or the phone app), skip this for now and wait for the web version.</span></p>
       </div>
     </div>
@@ -461,10 +468,108 @@
     </div>
   </section>
 
-  <!-- 5 規劃中 -->
-  <section class="chapter" id="explore" aria-labelledby="h-exp">
+  <!-- 5 聊天 -->
+  <section class="chapter" id="chat" aria-labelledby="h-chat">
     <div class="chapter-head">
       <div class="no">05</div>
+      <div>
+        <h2 id="h-chat"><span class="zh">聊天</span><span class="en">Chat</span> <span class="tag plan"><span class="zh">預覽</span><span class="en">Preview</span></span></h2>
+        <p class="measure muted"><span class="zh">聊天只在面板裡，外掛不會把它放進你的 Claude 對話。訊息在你的電腦上加密、簽章後才送出；中繼看不懂內容，只暫存密文。中繼還知道哪些事、各存多久，見下面。</span><span class="en">Chat stays in the panel, and the plugin does not put it into your Claude conversation. Messages are encrypted and signed on your computer before they are sent; the relay cannot read them and only holds the ciphertext. What else the relay knows, and how long it keeps things, is listed below.</span></p>
+      </div>
+    </div>
+    <div class="chapter-body">
+      <div class="side">
+        <div class="sticky"><span class="zh">預覽版。</span><span class="en">Preview.</span></div>
+      </div>
+      <div>
+        <div class="block">
+          <h3><span class="zh">預覽版，照實說</span><span class="en">A preview, stated plainly</span></h3>
+          <p class="measure"><span class="zh">聊天還在預覽，沒有前向保密：如果有人日後從聊天裡某台電腦拿到聊天金鑰，他可能讀得到先前被中繼、備份或錄下傳輸的人留存下來的訊息。能讀多久以前的，群組和私訊不一樣，見下面。</span><span class="en">Chat is a preview and does not have forward secrecy: if someone later gets chat keys from a computer in the chat, they may be able to read earlier messages that the relay, a backup or someone recording the traffic kept. How far back depends on the kind of chat; see below.</span></p>
+          <p class="measure"><span class="zh">私訊的金鑰大約每 100 則訊息或 7 天換一次（對方離線時會延後）；同一把金鑰每個方向最多用來送 120 則或 8 天，到了還沒換成，就要等換好才能再送。這不是每一則都換（不是 Double Ratchet）。有人拿到某段私訊目前的金鑰，讀得到用那把金鑰傳的訊息，換鑰前後 1 小時內上一把或下一把的也可能被讀到；已經換掉超過 1 小時的讀不到。</span><span class="en">Direct-message keys are replaced about every 100 messages or 7 days (later if the other person is offline). A key can be used to send at most 120 messages, or for at most 8 days, in each direction; if the replacement has not finished by then, you cannot send until it has. This is not full per-message key replacement (not a Double Ratchet). Someone who gets the current key of a direct-message conversation can read the messages sent with it, and possibly those sent with the key just before or after it (within an hour); messages from keys replaced more than an hour ago stay unreadable.</span></p>
+          <p class="measure"><span class="zh">私訊換新金鑰後，舊的金鑰最多再保留 1 小時，只用來收還在路上的訊息。</span><span class="en">After a direct-message key is replaced, the old key is kept for up to 1 more hour, only to receive messages that are still on the way.</span></p>
+          <p class="measure"><span class="zh">群組聊天的金鑰在有人加入、離開或被移出時，由群主的電腦換新，但不會定期更換。</span><span class="en">Group chat keys are replaced by the group owner's computer when someone joins, leaves or is removed, but not on a schedule.</span></p>
+          <p class="measure"><span class="zh">換新可能會延後（群主離線或新金鑰還沒送到每個人時），延後期間，被移出的人還可能讀到新訊息。有人從成員的電腦拿到金鑰，就讀得到先前被留存下來的群組訊息，之後的也讀得到，直到那台電腦被移出群組；有人拿到群主電腦上的金鑰，就打得開送給每個人的群組金鑰，也就讀得到各次換鑰後被留存的群組訊息。</span><span class="en">A replacement can be late (if the owner is offline or the new key has not reached everyone yet), and until it arrives someone who was removed may still read new messages. Someone who gets keys from a member's computer can read the earlier group messages that were saved, and the later ones until that computer is removed from the group; someone who gets the keys on the group owner's computer can open the group keys sent to everyone, so every saved group message since then.</span></p>
+        </div>
+        <div class="block">
+          <h3><span class="zh">中繼看得到什麼</span><span class="en">What the relay can see</span></h3>
+          <p class="measure"><span class="zh">中繼看得到：誰傳的（哪一台電腦）、傳給誰或哪個群組（私訊也看得到是誰傳給誰）、誰向誰提出私訊好友請求和誰拒絕了、誰封鎖了誰、你登記了哪些電腦、什麼時候傳、訊息多長、金鑰換過幾次、多久來問一次有沒有新訊息、你收走了哪幾則，還有你的 IP 位址。看不到訊息的內容。</span><span class="en">The relay can see who sent a message (and from which computer), to whom or to which group (for a direct message, who it was sent to), who asked whom to be direct-message friends and who declined, who blocked whom, which computers you registered, when a message was sent, how long it is, how many times the key has changed, how often you check for new messages and which ones you collected, and your IP address. It cannot see what the message says.</span></p>
+        </div>
+        <div class="block">
+          <h3><span class="zh">存多久</span><span class="en">How long things are kept</span></h3>
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th><span class="zh">資料</span><span class="en">Data</span></th>
+                <th><span class="zh">存在哪</span><span class="en">Where</span></th>
+                <th><span class="zh">存多久</span><span class="en">How long</span></th>
+                <th><span class="zh">誰看得到</span><span class="en">Who can see it</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="zh">群組聊天訊息（密文）</span><span class="en">Group chat message (ciphertext)</span></td>
+                <td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫</span><span class="en">Group database</span></td>
+                <td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">官方中繼：最多存 60 分鐘，每個群組一次最多放 50 則，到期就清掉；Cloudflare 的備份 30 天內還能還原。</span><span class="en">Official relay: held for 60 minutes at most, with room for 50 messages per group, then cleared. Cloudflare's backup can still restore them for 30 days.</span></td>
+                <td><span class="k"><span class="zh">誰看得到</span><span class="en">Who can see it</span></span><span class="zh">群組成員，以及中繼（見「中繼看得到什麼」）</span><span class="en">Group members, and the relay (see "What the relay can see")</span></td>
+              </tr>
+              <tr>
+                <td><span class="zh">私訊（密文）</span><span class="en">Direct message (ciphertext)</span></td>
+                <td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫</span><span class="en">Group database</span></td>
+                <td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">官方中繼：最多存 60 分鐘，每段私訊對話各有上限，到期就清掉；Cloudflare 的備份 30 天內還能還原。</span><span class="en">Official relay: held for 60 minutes at most, with a limit for each direct-message conversation, then cleared. Cloudflare's backup can still restore them for 30 days.</span></td>
+                <td><span class="k"><span class="zh">誰看得到</span><span class="en">Who can see it</span></span><span class="zh">私訊雙方，以及中繼（見「中繼看得到什麼」）</span><span class="en">The two people in the conversation, and the relay (see "What the relay can see")</span></td>
+              </tr>
+              <tr>
+                <td><span class="zh">私訊好友與封鎖紀錄</span><span class="en">Direct-message friendship and block records</span></td>
+                <td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫</span><span class="en">Group database</span></td>
+                <td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">存到你們兩人其中一人離開或被移出群組。解除封鎖時，好友關係和封鎖紀錄會一起清掉（還在等的請求照它自己的期限）；沒被接受的請求，不論有沒有被拒絕，7 天後清掉。Cloudflare 的備份在這裡同樣適用。</span><span class="en">Kept until one of the two people leaves or is removed from the group. When a block is lifted, the friendship and the block record are cleared together (a request that is still waiting keeps its own deadline); a request that is not accepted, whether or not it was declined, is cleared after 7 days. Cloudflare's backup applies here too.</span></td>
+                <td><span class="k"><span class="zh">誰看得到</span><span class="en">Who can see it</span></span><span class="zh">你和對方各自看得到自己那一筆，以及中繼（見「中繼看得到什麼」）</span><span class="en">You and the other person each see your own record, and the relay (see "What the relay can see")</span></td>
+              </tr>
+              <tr>
+                <td><span class="zh">你登記的電腦（聊天裝置公鑰）</span><span class="en">Computers you registered (chat device public keys)</span></td>
+                <td><span class="k"><span class="zh">存在哪</span><span class="en">Where</span></span><span class="zh">群組資料庫</span><span class="en">Group database</span></td>
+                <td><span class="k"><span class="zh">存多久</span><span class="en">How long</span></span><span class="zh">存到你離開或被移出群組。Cloudflare 的備份在這裡同樣適用。</span><span class="en">Kept until you leave or are removed from the group. Cloudflare's backup applies here too.</span></td>
+                <td><span class="k"><span class="zh">誰看得到</span><span class="en">Who can see it</span></span><span class="zh">群組成員，以及中繼（見「中繼看得到什麼」）</span><span class="en">Group members, and the relay (see "What the relay can see")</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="block">
+          <h3><span class="zh">每則訊息都有簽章</span><span class="en">Every message is signed</span></h3>
+          <p class="measure"><span class="zh">每一則訊息都有寄件人的簽章，收到的人會驗證。代價是：你寫過的話，收到的人可以向第三者證明那是用你的金鑰簽的，事後很難否認。</span><span class="en">Every message carries the sender's signature, and the people who receive it check it. The price: anyone who received something you wrote can prove to a third party that it was signed with your key, so you cannot easily deny it later.</span></p>
+        </div>
+        <div class="block">
+          <h3><span class="zh">誰是群組裡的誰（信任從哪來）</span><span class="en">Who is who in the group (where trust comes from)</span></h3>
+          <p class="measure"><span class="zh">群組聊天不信任中繼。你怎麼知道訊息真的是朋友傳的？靠群主簽的成員清單：群主用自己的身分金鑰簽一份「這個群組有誰、各自的金鑰是什麼」，每個人的外掛只相信這份簽過的清單，中繼回的名單與金鑰一律不算。你加入時拿到的邀請裡帶著群主的身分公鑰，你的外掛從這裡開始信任。</span><span class="en">Group chat does not trust the relay. How do you know a message really came from your friend? The group owner signs a member list ("who is in this group, and what is each person's key"). Every plugin believes only that signed list; whatever the relay says about members or keys counts for nothing. The invite you joined with carries the owner's identity public key, and your plugin starts trusting from there.</span></p>
+          <p class="measure"><span class="zh">加入時你要出示一份只有拿到邀請的人算得出的證明，群主驗過才把你放進清單；同一份邀請只能用一次。有人離開或被移出時，群主會重簽清單、換聊天金鑰、換新的邀請秘密，舊邀請作廢。</span><span class="en">To join, you present a proof that only someone holding the invite can compute; the owner checks it before adding you, and one invite works once. When someone leaves or is removed, the owner re-signs the list, replaces the chat key and the invite secret, and old invites stop working.</span></p>
+          <p class="measure"><span class="zh">清單最久 14 天有效，所以群主需要偶爾開著 Claude Code；超過 14 天沒重簽，聊天會暫停，等群主回來。</span><span class="en">A signed list is valid for at most 14 days, so the owner's Claude Code needs to be on now and then. If it is not re-signed for more than 14 days, chat pauses until the owner is back.</span></p>
+          <p class="measure"><span class="zh">邀請現在是一長串以 wf1: 開頭的文字。請貼在面板的輸入框，<b>不要貼進 Claude 的對話</b>（裡面有一次性的秘密，貼進對話 Claude 就看得到）。用舊的 /friends join 連結加入的人還是看得到群組動態，但聊天要用新的邀請重新加入才能開。</span><span class="en">An invite is now a long string starting with wf1:. Paste it into the panel's input, <b>not into your Claude conversation</b> (it contains a one-time secret that Claude would see). People who joined with an old /friends join link still see group activity, but need a new invite to use chat.</span></p>
+        </div>
+        <div class="block">
+          <h3><span class="zh">限制，照實列出</span><span class="en">Limits, listed plainly</span></h3>
+          <ul class="measure plain">
+            <li><span class="zh">中繼還是可以丟掉或延遲訊息。同一台電腦傳的訊息中間少了一則、或順序被換掉時，你會看到提醒；從某個時候起的訊息全部被丟掉（後面沒有新訊息可以對照）、不同人或不同電腦之間的先後被換、或剛好在換金鑰前後少了訊息，都看不出來。</span><span class="en">The relay can still drop or delay messages. If a message from one person's computer goes missing or arrives out of order, you will see a notice; messages being dropped from some point on, however many (nothing later arrives to compare), a change in order between different people or computers, or messages lost right around a key change cannot be noticed.</span></li>
+            <li><span class="zh">金鑰存在你的電腦上，同一台電腦上的其他程式（包括 Claude 的檔案工具）有可能讀得到，進而讀到你的聊天、用你的名義傳訊息。</span><span class="en">Your keys are kept on your computer. Other programs on the same computer, including Claude's file tools, may be able to read them, and could then read your chats and send messages in your name.</span></li>
+            <li><span class="zh">如果你讓 Claude 截圖或操作你的電腦，它看得到畫面上的聊天內容。</span><span class="en">If you let Claude take screenshots or operate your computer, it can see the chat on your screen.</span></li>
+            <li><span class="zh">中繼換不了朋友的金鑰（有群主的簽章擋著），但目前還沒有安全碼：你要信任的是你拿到的那份邀請，和群主本人。邀請如果在送到你之前被人換過，你會信錯群主。</span><span class="en">There is no safety code yet. The relay cannot swap your friend's key (the owner's signature stands in the way), but what you trust is the invite you received and the owner. If someone swapped the invite on its way to you, you would trust the wrong owner.</span></li>
+            <li><span class="zh">群主可以冒充任何成員，因為成員清單是群主簽的。</span><span class="en">The owner can impersonate any member, because the owner signs the member list.</span></li>
+            <li><span class="zh">預設「成員可以邀請」是開著的，所以每位成員手上都有邀請秘密；如果有成員和中繼串通，可以替新加入的人偽造證明。只邀請你信任的人。</span><span class="en">By default members can invite, so every member holds the invite secret; a member colluding with the relay could forge a proof for someone new. Invite only people you trust.</span></li>
+            <li><span class="zh">群主的身分金鑰只在建立群組的那台電腦上；那台電腦壞了或換掉，目前沒有把群組交給別人當群主的功能。</span><span class="en">The owner's identity key lives only on the computer that created the group; there is no way yet to hand the group to another owner.</span></li>
+            <li><span class="zh">中繼可以扣住最新的成員清單，最久 14 天；這段時間內剛被移出的人可能還在清單裡。</span><span class="en">The relay can withhold the newest member list for up to 14 days; someone just removed may still be listed meanwhile.</span></li>
+            <li><span class="zh">加入群組的人會從群主的電腦拿到群組聊天金鑰（群主的 Claude Code 要開著才行），所以只把邀請給你信任的人。</span><span class="en">Whoever joins the group gets the group chat key from the group owner's computer (whose Claude Code has to be running for that), so only give the invite to people you trust.</span></li>
+            <li><span class="zh">群組裡的成員可能把信箱（50 則）塞滿，讓其他人暫時送不出訊息。</span><span class="en">Members of a group can fill its mailbox (50 messages) and stop the others from sending for a while.</span></li>
+            <li><span class="zh">離開或被移出的人手上可能還留著他離開前收到的訊息和金鑰。</span><span class="en">Someone who leaves or is removed may still have the messages and keys they received before they left.</span></li>
+            <li><span class="zh">中繼可以拖延換金鑰；換好之前，離開或被移出的人還可能讀得到新的訊息。</span><span class="en">The relay can delay a key replacement; until it happens, someone who left or was removed may still be able to read new messages.</span></li>
+            <li><span class="zh">本專案可以發布新版外掛，新版會換掉程式碼；你可以在 GitHub 讀已公開版本的原始碼（每隔幾版才更新一次，你用的這一版不一定已經在上面），也可以自己建置來比對（見「版本與更新」）。</span><span class="en">This project can publish a new version of the plugin, and a new version replaces the code. You can read the source of the versions that have been published on GitHub (it is updated every few versions, so the one you run may not be there yet), and rebuild it to compare (see "Versions and updates").</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 規劃中 -->
+  <section class="chapter" id="explore" aria-labelledby="h-exp">
+    <div class="chapter-head">
+      <div class="no">06</div>
       <div>
         <h2 id="h-exp"><span class="zh">探索群組</span><span class="en">Discover groups</span> <span class="tag plan"><span class="zh">規劃中</span><span class="en">Planned</span></span></h2>
         <p class="measure muted"><span class="zh">之後想讓群組可以選擇公開，讓其他人找得到、申請加入。現在還沒做，也還沒決定細節。</span><span class="en">One idea for later: letting a group choose to be public so others can find it and ask to join. Not built, and the details aren't decided.</span></p>

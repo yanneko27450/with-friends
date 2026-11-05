@@ -21,6 +21,7 @@ const isTestBuild = arg('--out') !== undefined
 const base = (arg('--base') ?? 'https://friends-status-relay.friends-status-relay.workers.dev').replace(/\/+$/, '')
 
 const manifest = JSON.parse(readFileSync(join(mod, '.claude-plugin', 'plugin.json'), 'utf8'))
+const realVersion = manifest.version // --version 蓋掉之前的真實版本（zip 裡的程式碼是這一版的）
 if (arg('--version')) {
   if (!isTestBuild) throw new Error('--version 只給測試用，要搭配 --out')
   manifest.version = arg('--version')
@@ -48,10 +49,27 @@ if (!isTestBuild) {
     console.log('（沒有 CHANGELOG.md 和 team/tools/：略過版本紀錄對照）')
   }
 }
+// CHAT-5 發版鎖：外掛有聊天的版本（0.6.0 起）要先有相容閘門——兩個中繼（Node 版、Worker 版）都要有簽章回應的 GET /capability，不然不產 zip。
+// 只看 plugin.json 的真實版本（zip 裡的程式碼是這一版的；--version 只改標籤），不管輸出到哪、不管有沒有 --out。
+// 一開始試過「只擋輸出在 relay/worker/public 之內」，但同一個資料夾的寫法太多（長路徑前綴、UNC、junction、subst、8.3 短名），猜不完，所以改成不猜路徑。
+// 代價：0.6.0 以上的外掛，在中繼端做完之前連測試用的建置都不能出（先做中繼端，再升版）。版本讀不出來（例如 0.x）一律當作要擋。
+// 這只是最後一道絆線（看原始碼有沒有這條路由）；真正的相容測試是 docs/drafts/chat5-gate-design.md 第 5 節的 T1～T7
+const isChatVersion = version => {
+  const [major, minor] = String(version).split('.').map(Number)
+  return !Number.isInteger(major) || !Number.isInteger(minor) || major > 0 || minor >= 6
+}
+if (isChatVersion(realVersion)) {
+  for (const file of [join(here, '..', 'server.mjs'), join(here, 'src', 'index.mjs')]) {
+    if (!existsSync(file) || !readFileSync(file, 'utf8').includes('GET /capability')) {
+      throw new Error(`plugin.json 的版本是 ${realVersion}（有聊天或讀不出版本），但 ${file} 沒有 GET /capability：聊天相容閘門還沒做完，不能出這一版（docs/drafts/chat5-gate-design.md）。沒有產 zip。`)
+    }
+  }
+}
 // 只放外掛本體：manifest、hooks、types 宣告；測試和 tsc 用的型別檔不放
 const files = [
   '.claude-plugin/plugin.json',
-  ...readdirSync(join(mod, 'hooks')).sort().map(f => 'hooks/' + f),
+  // dot files are scratch (for example mutation-test copies) and never ship
+  ...readdirSync(join(mod, 'hooks')).filter(f => !f.startsWith('.')).sort().map(f => 'hooks/' + f),
   'types/index.d.ts',
 ]
 

@@ -16,6 +16,11 @@ const PORT = Number(arg('--port', process.env.PORT ?? 8789))
 const DATA = arg('--data', '')
 // 測試用：把 24 小時的動態保存期限縮短
 const TTL = Number(arg('--activity-ttl-ms', core.ACTIVITY_TTL_MS))
+const CHAT_TTL = Number(arg('--chat-ttl-ms', core.CHAT_TTL_MS))
+const CHAT_MAX = Number(arg('--chat-max-messages', core.CHAT_MAX_MESSAGES))
+const CHAT_SENDER = Number(arg('--chat-sender-max', core.CHAT_SENDER_MAX))
+const DM_MAX = Number(arg('--dm-max-messages', core.DM_MAX_MESSAGES))
+const DM_SENDER = Number(arg('--dm-sender-max', core.DM_SENDER_MAX))
 // 測試用：限流測試要扮成不同的 IP（sec-2）。只有帶這個參數才讀 x-test-ip，正式啟動照舊用連線的 IP
 const TEST_IP_HEADER = process.argv.includes('--test-ip-header')
 if (TEST_IP_HEADER) console.error('⚠ --test-ip-header：x-test-ip 標頭可以假冒 IP、繞過限流，只能拿來跑測試')
@@ -32,6 +37,9 @@ if (ADMIN_KEY && !core.ADMIN_KEY_RE.test(ADMIN_KEY)) {
   console.error('⚠ FRIENDS_ADMIN_KEY 要 24～200 個字、不能有空白，查詢端點不開')
   ADMIN_KEY = ''
 }
+// CHAT-5R：聊天總開關，預設關。FRIENDS_CHAT_ENABLED 只有 1 才開；關著時 /capability 回 chat.enabled:false，/chat/*、/dm/* 一律 403 chat-disabled
+const CHAT_ENABLED = core.chatEnabledOf(process.env.FRIENDS_CHAT_ENABLED)
+if (!CHAT_ENABLED && process.env.FRIENDS_CHAT_ENABLED) console.error('⚠ FRIENDS_CHAT_ENABLED 只認 1，其他值都當關')
 const PUBLIC_CAPACITY = process.env.FRIENDS_PUBLIC_CAPACITY === '1'
 const CAPACITY_BLOCK_AT = Number(process.env.FRIENDS_CAP_BLOCK) || CAPACITY_BLOCK
 let capacityReservations = 0
@@ -63,6 +71,9 @@ function loadData() {
   return { groups: {} }
 }
 let db = loadData()
+if (!(db.chat && typeof db.chat === 'object' && !Array.isArray(db.chat))) db.chat = {}
+// 私訊信箱：db.dm[群組代碼][信箱代碼] = mailbox（連結本身在群組資料 g.dm.links）
+if (!(db.dm && typeof db.dm === 'object' && !Array.isArray(db.dm))) db.dm = {}
 // 沒開就連舊的統計一起丟掉：資料檔是整份寫回，不清會一直留著
 // 統計的格式不對（手改過、舊版）就重新開始記，不讓每次 /status 都出錯
 if (WEEKLY && !(typeof db.weekly === 'object' && db.weekly !== null && Array.isArray(db.weekly.groups) && Number.isInteger(db.weekly.week))) db.weekly = core.newWeeklyStats()
@@ -93,6 +104,17 @@ function save() {
 function sweep() {
   let isDirty = false
   for (const g of Object.values(db.groups)) isDirty = core.expireActivity(g, Date.now(), TTL) || isDirty
+  for (const mailbox of Object.values(db.chat)) isDirty = core.expireChatMailbox(mailbox, Date.now()) || isDirty
+  // 私訊：過期的等待請求連同信箱一起刪，信箱裡過期的訊息清掉，沒有連結的信箱丟掉
+  for (const [groupId, g] of Object.entries(db.groups)) {
+    const boxes = (db.dm[groupId] ??= {})
+    const gone = core.dmExpire(g, Date.now())
+    for (const code of gone) delete boxes[code]
+    const { touched, removed } = core.dmExpireBoxes(g, boxes, Date.now())
+    isDirty = gone.length > 0 || touched.length > 0 || removed.length > 0 || isDirty
+    if (!Object.keys(boxes).length) delete db.dm[groupId]
+  }
+  for (const groupId of Object.keys(db.dm)) if (!Object.hasOwn(db.groups, groupId)) { delete db.dm[groupId]; isDirty = true }
   // 計時器裡出錯沒人接會讓整個中繼掛掉（例如 Windows 上資料檔被別的程序開著，存檔改名失敗）：印一行，下次再試
   if (isDirty) {
     try {
@@ -103,7 +125,10 @@ function sweep() {
   }
 }
 sweep()
-setInterval(sweep, Math.min(60_000, TTL)).unref()
+setInterval(sweep, Math.min(60_000, TTL, CHAT_TTL)).unref()
+
+// 聊天／私訊路由存檔失敗（已還原）：500 加 reason，跟 0.5.8 的規則一致；外掛看 reason 判斷能不能重試
+const CHAT_SAVE_FAILED = core.CHAT_SAVE_FAILED
 
 // 簡單限流：每個 IP 每分鐘 600 次；加入每小時 10 次
 const limited = core.makeLimiter()
@@ -116,7 +141,10 @@ async function findMember(req) {
   if (!a) return null
   const g = groupOf(a.groupId)
   // 過期動態和版本都只改記憶體，要不要存檔交給 authed 一次決定（同一個請求只存一次，fix-6）。金鑰不對時沒有 authed 可交，過期的那次當場存
-  const expired = g ? core.expireActivity(g, Date.now(), TTL) : false
+  // 等待同意的人過期也一併清（SEC064），清了就要存；兩個都要跑，不能短路
+  const expiredActivity = g ? core.expireActivity(g, Date.now(), TTL) : false
+  const expiredPending = g ? core.expirePending(g, Date.now()) : false
+  const expired = expiredActivity || expiredPending
   const mem = await core.findMember(g, a.memberId, a.key)
   if (!mem) {
     if (expired) save()
@@ -145,6 +173,45 @@ const authed = fn => async (req, b, ip) => {
   }
 }
 
+// 改到私訊連結的路由：連結在群組資料裡、信箱訊息另外放；存檔失敗就兩邊一起還原成請求之前，回 500（沒有任何改動）
+function dmLink(fn) {
+  return authed((who, b) => {
+    const gBefore = structuredClone(who.g)
+    const boxesBefore = db.dm[who.groupId] ? structuredClone(db.dm[who.groupId]) : undefined
+    const boxes = db.dm[who.groupId] ?? {}
+    const [code, obj, changed, removed] = fn(who.g, who.memberId, b, Date.now(), boxes)
+    if (changed) {
+      for (const c of removed) delete boxes[c]
+      if (Object.keys(boxes).length) db.dm[who.groupId] = boxes
+      else delete db.dm[who.groupId]
+      try { save() } catch {
+        for (const key of Object.keys(who.g)) delete who.g[key]
+        Object.assign(who.g, gBefore)
+        if (boxesBefore === undefined) delete db.dm[who.groupId]
+        else db.dm[who.groupId] = boxesBefore
+        return CHAT_SAVE_FAILED
+      }
+    }
+    return [code, obj]
+  })
+}
+
+// 改到成員紀錄裡的聊天狀態（裝置清單、epoch 封包）的路由：存檔失敗就整個群組還原成請求之前，回 500（沒有任何改動）
+function chatState(fn) {
+  return authed((who, b) => {
+    const gBefore = structuredClone(who.g)
+    const [code, obj, changed] = fn(who.g, who.memberId, who.mem, b, Date.now())
+    if (changed) {
+      try { save() } catch {
+        for (const key of Object.keys(who.g)) delete who.g[key]
+        Object.assign(who.g, gBefore)
+        return CHAT_SAVE_FAILED
+      }
+    }
+    return [code, obj]
+  })
+}
+
 const routes = {
   'POST /groups': async (req, b) => {
     if (PUBLIC_CAPACITY && activeMembershipCount(db.groups) + capacityReservations >= CAPACITY_BLOCK_AT) return [503, { error: CAPACITY_ERROR }]
@@ -163,10 +230,22 @@ const routes = {
     if (PUBLIC_CAPACITY) capacityReservations += 1
     try {
       const groupId = core.groupIdOfInvite(core.clean(b.invite, 200))
-      const r = await core.join(groupOf(groupId), groupId, b, Date.now(), ver(req))
-      if (r[0] === 200) save()
-      return r
+      const g = groupOf(groupId)
+      const r = await core.join(g, groupId, b, Date.now(), ver(req))
+      if (r[0] === 200 || r[0] === 202) { // 202＝建立了等待同意的要求（SEC064）
+        // 存檔失敗：還原成加入之前，不留下沒人拿得到憑證的成員或等待要求
+        try { save() } catch { core.restoreGroup(g, r[3]); return [500, { error: '儲存暫時不可用，請再試一次', reason: 'unreachable' }] }
+      }
+      return [r[0], r[1]]
     } finally { if (PUBLIC_CAPACITY) capacityReservations -= 1 }
+  },
+  // SEC064：加入的人問自己有沒有被同意（金鑰是加入時拿到的；等待者還不是成員，所以不走 authed）
+  'POST /join/status': async req => {
+    const a = core.parseAuth(req.headers.authorization)
+    if (!a) return [401, { error: '金鑰無效' }]
+    const [code, obj, isDirty] = await core.joinStatus(groupOf(a.groupId), a.memberId, a.key, Date.now())
+    if (isDirty) try { save() } catch (err) { console.error(`⚠ 存資料檔失敗（${err.code ?? err.message}），下次再試`) }
+    return [code, obj]
   },
   'POST /status': authed(async (who, b) => {
     const now = Date.now()
@@ -178,15 +257,124 @@ const routes = {
   }),
   // 拉好友列表（舊版 mod 用；新版從 /status 的回應拿）
   'GET /friends': authed(who => [200, core.friendsView(who.g, who.memberId, Date.now())]),
+  'POST /chat/device': authed((who, b) => {
+    const previous = who.mem.chatDevices ? structuredClone(who.mem.chatDevices) : undefined
+    const [code, obj, dirty] = core.registerChatDevice(who.mem, b)
+    if (dirty) try { save() } catch {
+      if (previous === undefined) delete who.mem.chatDevices
+      else who.mem.chatDevices = previous
+      return CHAT_SAVE_FAILED
+    }
+    return [code, obj]
+  }),
+  'POST /chat/publish': authed(async (who, b) => {
+    const mailbox = structuredClone(db.chat[who.groupId] ?? core.newChatMailbox())
+    const [code, obj, dirty] = await core.publishChatEnvelope(who.groupId, who.memberId, who.mem, b, mailbox, Date.now(), CHAT_TTL, CHAT_MAX, CHAT_SENDER)
+    if (dirty) {
+      const previous = db.chat[who.groupId]
+      db.chat[who.groupId] = mailbox
+      try { save() } catch {
+        if (previous === undefined) delete db.chat[who.groupId]
+        else db.chat[who.groupId] = previous
+        return CHAT_SAVE_FAILED
+      }
+    }
+    return [code, obj]
+  }),
+  'POST /chat/poll': authed((who, b) => {
+    const mailbox = structuredClone(db.chat[who.groupId] ?? core.newChatMailbox())
+    const [code, obj, dirty] = core.pollChatMailbox(b, mailbox, Date.now())
+    if (dirty) {
+      const previous = db.chat[who.groupId]
+      db.chat[who.groupId] = mailbox
+      try { save() } catch {
+        if (previous === undefined) delete db.chat[who.groupId]
+        else db.chat[who.groupId] = previous
+        return CHAT_SAVE_FAILED
+      }
+    }
+    return [code, obj]
+  }),
+  // ── 裝置清單與 epoch 金鑰封包（CHAT3b-RELAY）──
+  'POST /chat/roster/put': chatState((g, me, mem, b, now) => core.putRoster(g, me, mem, b, now)),
+  'POST /chat/roster/get': chatState((g, _me, _mem, _b, now) => core.getRosters(g, now)),
+  'POST /chat/epoch/put': chatState((g, me, _mem, b, now) => core.putEpochPackets(g, me, b, now)),
+  'POST /chat/epoch/get': chatState((g, me, mem, b, now) => core.getEpochPackets(g, me, mem, b, now)),
+  'POST /chat/join/put': chatState((g, me, mem, b, now) => core.putJoinProof(g, me, mem, b, now)),
+  'POST /chat/join/get': chatState((g, me) => core.getJoinProofs(g, me)),
+  'POST /chat/members/put': chatState((g, me, _mem, b, now) => core.putMemberList(g, me, b, now)),
+  'POST /chat/members/get': chatState((g, _me, _mem, _b, now) => core.getMemberList(g, now)),
+  // ── 私訊（CHAT3-RELAY，設計見 docs/drafts/chat3-relay-design.md）──
+  'POST /dm/request': dmLink(core.dmRequest),
+  'POST /dm/accept': dmLink(core.dmAccept),
+  'POST /dm/decline': dmLink(core.dmDecline),
+  'POST /dm/block': dmLink(core.dmBlock),
+  'POST /dm/unblock': dmLink(core.dmUnblock),
+  'POST /dm/list': dmLink((g, me, _b, now) => core.dmList(g, me, now)),
+  'POST /dm/send': authed(async (who, b) => {
+    const boxes = structuredClone(db.dm[who.groupId] ?? {})
+    const [code, obj, dirty] = await core.dmSend(who.g, who.groupId, who.memberId, who.mem, b, boxes, Date.now(), CHAT_TTL, DM_MAX, DM_SENDER)
+    if (dirty) {
+      const previous = db.dm[who.groupId]
+      db.dm[who.groupId] = boxes
+      try { save() } catch {
+        if (previous === undefined) delete db.dm[who.groupId]
+        else db.dm[who.groupId] = previous
+        return CHAT_SAVE_FAILED
+      }
+    }
+    return [code, obj]
+  }),
+  'POST /dm/poll': authed((who, b) => {
+    const boxes = structuredClone(db.dm[who.groupId] ?? {})
+    const [code, obj, touched] = core.dmPoll(who.g, who.memberId, b, boxes, Date.now())
+    if (touched.length) {
+      const previous = db.dm[who.groupId]
+      db.dm[who.groupId] = boxes
+      try { save() } catch {
+        if (previous === undefined) delete db.dm[who.groupId]
+        else db.dm[who.groupId] = previous
+        return CHAT_SAVE_FAILED
+      }
+    }
+    return [code, obj]
+  }),
+  // 寫入失敗就還原成請求前的樣子再回 500：「沒有改到任何東西」要真的做到（SEC064）
   'POST /invite/rotate': authed(async who => {
     const r = await core.rotateInvite(who.g, who.groupId, who.memberId)
-    if (r[0] === 200) save()
-    return r
+    if (r[0] === 200) {
+      try { save() } catch { core.restoreGroup(who.g, r[3]); return [500, { error: '儲存暫時不可用，沒有任何改動', reason: 'unreachable' }] }
+    }
+    return [r[0], r[1]]
   }),
   'POST /kick': authed(async (who, b) => {
     const r = await core.kick(who.g, who.groupId, who.memberId, b)
-    if (r[0] === 200) save()
-    return r
+    if (r[0] === 200) {
+      const previousChat = db.chat[who.groupId]
+      if (previousChat) db.chat[who.groupId] = structuredClone(previousChat)
+      if (db.chat[who.groupId]) core.clearChatForMember(db.chat[who.groupId], b.memberId)
+      const previousDm = db.dm[who.groupId]
+      if (previousDm) db.dm[who.groupId] = structuredClone(previousDm)
+      for (const code of core.dmDropMember(who.g, b.memberId)) delete db.dm[who.groupId]?.[code]
+      try { save() } catch {
+        core.restoreGroup(who.g, r[3])
+        if (previousChat) db.chat[who.groupId] = previousChat
+        if (previousDm) db.dm[who.groupId] = previousDm
+        return [500, { error: '儲存暫時不可用，沒有任何改動', reason: 'unreachable' }]
+      }
+    }
+    return [r[0], r[1]]
+  }),
+  'POST /owner/act': authed(async (who, b) => {
+    const r = await core.ownerAct(who.g, who.groupId, who.memberId, b, Date.now())
+    if (r[2]) {
+      try { save() } catch {
+        core.restoreGroup(who.g, r[3])
+        const [code, obj] = core.ownerFailure('unreachable')
+        return [code, obj]
+      }
+    }
+    return [r[0], r[1]]
   }),
   'POST /name': async (req, b, ip) => {
     const invalid = core.renameInputError(b)
@@ -199,12 +387,28 @@ const routes = {
     })(req, b, ip)
   },
   'POST /leave': authed(who => {
+    // 存檔失敗就還原成離開之前（含建立者離開時的換人、撤銷邀請），回 500
+    const groupBefore = structuredClone(who.g)
+    const chatBefore = db.chat[who.groupId]
+    if (chatBefore) db.chat[who.groupId] = structuredClone(chatBefore)
+    if (db.chat[who.groupId]) core.clearChatForMember(db.chat[who.groupId], who.memberId)
+    const dmBefore = db.dm[who.groupId]
+    if (dmBefore) db.dm[who.groupId] = structuredClone(dmBefore)
+    for (const code of core.dmDropMember(who.g, who.memberId)) delete db.dm[who.groupId]?.[code]
     const { reply, isEmpty } = core.leave(who.g, who.memberId)
-    if (isEmpty) delete db.groups[who.groupId]
-    save()
+    if (isEmpty) { delete db.groups[who.groupId]; delete db.chat[who.groupId]; delete db.dm[who.groupId] }
+    try { save() } catch {
+      core.restoreGroup(who.g, groupBefore)
+      db.groups[who.groupId] = who.g
+      if (chatBefore) db.chat[who.groupId] = chatBefore
+      if (dmBefore) db.dm[who.groupId] = dmBefore
+      return [500, { error: '儲存暫時不可用，請再試一次', reason: 'unreachable' }]
+    }
     return reply
   }),
   'GET /health': async () => [200, { ok: true }],
+  // CHAT-5R：外掛先問這條再決定要不要顯示聊天。不需要 Bearer、不含任何群組資料；簽章走 send()（跟其他路由同一個簽章，含 404）
+  'GET /capability': async () => [200, core.capabilityBody(CHAT_ENABLED)],
 }
 if (WEEKLY && ADMIN_KEY) {
   routes['GET /admin/weekly'] = async req =>
@@ -254,6 +458,8 @@ const server = http.createServer(async (req, res) => {
     // 外掛把「帶 pauseSeq 的請求收到 400」當成中繼不認得這個欄位，暫時性的內部錯誤不能冒充成 400
     let b
     try { b = req.method === 'POST' ? await body(req) : {} } catch { return await send(400, { error: '請求格式錯誤' }) }
+    // 總開關關著：對不合作的外掛也有效（不能只靠外掛自覺不呼叫）
+    if (!CHAT_ENABLED && core.isChatPath(path)) { const [code, obj] = core.chatDisabledReply(); return await send(code, obj) }
     const [code, obj] = await route(req, b, ip)
     await send(code, obj)
   } catch (err) {

@@ -222,7 +222,7 @@ export const STRINGS = {
         case 0: return "Can't reach the relay. Check your internet connection and try again."
         case 400: return "The relay didn't accept the request (it may be running a different version)."
         case 401: return 'This computer is no longer in that group (you were removed, or the group was deleted).'
-        case 403: return 'The relay said no: the invite may be wrong or expired, the group may be full (10 people), or only the group creator can do that.'
+        case 403: return 'The relay said no: the invite may be wrong or expired, the group may be full (5 people), or only the group creator can do that.'
         case 404: return "This relay doesn't support that. Check the relay address with /friends relay."
         case 503: return `The public relay is full. Existing members can keep using it; to create or join another group, self-host a relay: ${SOURCE_URL}/blob/main/relay/DEPLOY.md`
         case 429: return 'Too many tries. Wait a while and try again.'
@@ -452,7 +452,7 @@ export const STRINGS = {
         case 0: return '連不上伺服器，檢查網路後再試一次。'
         case 400: return '伺服器不接受這個請求（可能和外掛版本不同）。'
         case 401: return '這台電腦已經不在那個群組裡了（被移除，或群組已刪除）。'
-        case 403: return '伺服器拒絕了：邀請可能打錯或失效、群組可能滿了（10 人），或這件事只有群組建立者能做。'
+        case 403: return '伺服器拒絕了：邀請可能打錯或失效、群組可能滿了（5 人），或這件事只有群組建立者能做。'
         case 404: return '這個伺服器不支援這個動作，用 /friends relay 檢查伺服器網址。'
         case 503: return `公開伺服器滿了；已加入的人仍可繼續使用。要建立或加入其他群組，請自己架一個伺服器：${SOURCE_URL}/blob/main/relay/DEPLOY.md`
         case 429: return '嘗試太多次，等一下再試。'

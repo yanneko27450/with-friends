@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
-import { createPublicKey, randomBytes, verify as verifySignature } from 'node:crypto'
+import { createPublicKey, generateKeyPairSync, randomBytes, sign as nodeSign, verify as verifySignature } from 'node:crypto'
 import * as core from './core.mjs'
 import { MAX_MEMBERS, MIN_VERSION, createGroup, join } from './core.mjs'
 import { ACTIONS, SUBJECTS, ACTION_LABEL } from '../mod/hooks/taxonomy.ts'
@@ -17,6 +17,7 @@ import { fromB64url, responseEnvelope, responseSigner } from './response-signing
 const SIGNING_ENV = {
   RESPONSE_SIGNING_PRIVATE_KEY: TEST_RESPONSE_SIGNING.privateKeyPkcs8,
   RESPONSE_SIGNING_KEY_ID: TEST_RESPONSE_SIGNING.keyId,
+  FRIENDS_CHAT_ENABLED: '1', // CHAT-5R：聊天總開關預設關，這些測試要打聊天路由
 }
 const spkiPrefix = Buffer.from('302a300506032b6570032100', 'hex')
 const testResponsePublicKey = createPublicKey({ key: Buffer.concat([spkiPrefix, Buffer.from(fromB64url(TEST_RESPONSE_SIGNING.publicKey))]), format: 'der', type: 'spki' })
@@ -125,6 +126,25 @@ try {
     assert.equal(b.data.isOwner, false)
     bob = b.data
     carol = c.data
+  })
+  await check('CHAT-2：登記裝置、簽章密文 publish／poll，壞簽章與未授權固定拒絕', async () => {
+    const pair = generateKeyPairSync('ed25519')
+    const publicKey = Buffer.from(pair.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32)).toString('base64url')
+    assert.equal((await call('POST', '/chat/device', { deviceId: 'alice-phone', publicKey }, alice)).status, 200)
+    const unsigned = { version: 2, groupId: alice.groupId, senderId: alice.memberId, deviceId: 'alice-phone',
+      messageId: randomBytes(16).toString('base64url'), sentAt: Date.now(), epoch: 1,
+      nonce: randomBytes(24).toString('base64url'), commit: randomBytes(32).toString('base64url'),
+      ciphertext: randomBytes(49).toString('base64url') }
+    const envelope = { ...unsigned, signature: nodeSign(null, Buffer.from(core.chatSignatureBytes(unsigned)), pair.privateKey).toString('base64url') }
+    const published = await call('POST', '/chat/publish', { envelope }, alice)
+    assert.equal(published.status, 200)
+    const polled = await call('POST', '/chat/poll', { after: 0 }, bob)
+    assert.equal(polled.status, 200)
+    assert.equal(polled.data.messages.length, 1)
+    assert.deepEqual(polled.data.messages[0].envelope, envelope)
+    const bad = { ...envelope, messageId: randomBytes(16).toString('base64url') }
+    assert.equal((await call('POST', '/chat/publish', { envelope: bad }, alice)).status, 403)
+    assert.equal((await call('POST', '/chat/publish', { envelope }, 'Bearer bad.bad.bad')).status, 401)
   })
   await check('送清單內代碼的動態，好友看得到代碼', async () => {
     const s = await call('POST', '/status', { state: 'working', action: 'fixing-bugs', subject: 'website' }, alice)
@@ -317,6 +337,37 @@ try {
     assert.deepEqual(await seen(), ['working', 'fixing-bugs', 'website'])
     await send({ state: 'offline' })
   })
+  // 0.6.0：送狀態的回應帶「自己」的 paused／pauseSeq（只給本人），外掛才知道中繼有沒有忽略它送的序號
+  await check('0.6.0 /status 回應帶自己的 paused 與 pauseSeq：沒用過＝false／0；暫停後反映；舊序號被忽略時回應仍是中繼現在的值；GET /friends 不帶；好友看不到', async () => {
+    const hana = (await call('POST', '/groups', { name: 'Hana' })).data
+    const ivan = (await call('POST', '/join', { invite: hana.invite, name: 'Ivan' }, undefined, undefined, '192.0.2.203')).data
+    const H = { conn: 'convReplyHANA1' }
+    const send = (body, who = hana, version = '0.6.0') => call('POST', '/status', { ...H, ...body }, who, undefined, undefined, version)
+    let r = await send({ state: 'idle' })
+    assert.equal(r.data.paused, false)
+    assert.equal(r.data.pauseSeq, 0)
+    r = await send({ state: 'idle', paused: true, pauseSeq: 10 })
+    assert.deepEqual([r.data.paused, r.data.pauseSeq], [true, 10], '暫停後的回應反映')
+    r = await send({ state: 'working', paused: false, pauseSeq: 5 })
+    assert.deepEqual([r.data.paused, r.data.pauseSeq], [true, 10], '舊序號的繼續被忽略：回應看得出來（中繼仍是暫停、序號 10）')
+    r = await send({ state: 'idle' })
+    assert.deepEqual([r.data.paused, r.data.pauseSeq], [true, 10], '只送心跳也回目前的值')
+    r = await send({ state: 'working', paused: false, pauseSeq: 20 })
+    assert.deepEqual([r.data.paused, r.data.pauseSeq], [false, 20])
+    // 沒帶序號的暫停（舊外掛）：paused 變了，序號不變
+    r = await send({ state: 'idle', paused: true }, hana, '0.5.7')
+    assert.deepEqual([r.data.paused, r.data.pauseSeq], [true, 20])
+    // 409（緩衝期內沒帶序號的繼續）不帶這兩個欄位
+    const blocked = await send({ state: 'working', paused: false }, hana, '0.5.7')
+    assert.equal(blocked.status, 409)
+    // 別人的回應是別人自己的值；GET /friends 不帶
+    const other = await send({ state: 'idle' }, ivan)
+    assert.deepEqual([other.data.paused, other.data.pauseSeq], [false, 0])
+    const f = await call('GET', '/friends', undefined, ivan)
+    assert.equal('paused' in f.data || 'pauseSeq' in f.data, false)
+    for (const m of f.data.members) assert.equal('paused' in m || 'pauseSeq' in m, false, '好友列表的成員不帶')
+    await send({ state: 'offline' })
+  })
   await check('0.5.8 暫停序號：core.status 單元——序號接受才寫資料庫、舊序號不寫；序號存在成員身上；好友列表不回序號', async () => {
     const g = { ownerId: 'o', members: { o: { name: 'O', conns: {}, action: '', subject: '', activityAt: 0, seenAt: 0 } } }
     const mem = g.members.o
@@ -337,6 +388,7 @@ try {
     assert.equal(send({ paused: false, pauseSeq: 11 }, 4600)[2], false)
     assert.equal(mem.paused, true, '同序號的繼續不能解除')
     // 緩衝期：帶序號的暫停／繼續之後 60 秒內，沒帶序號的明確繼續回 409、不動旗標；期滿後生效（混用舊版對話不會永遠卡在暫停）
+    assert.ok(core.LEGACY_RESUME_GRACE_MS >= 15_000 && core.LEGACY_RESUME_GRACE_MS <= 20_000, '混版本補送窗口 15～20 秒（0.6.0）')
     assert.equal(mem.pauseSeqAt, 4000)
     const legacyResume = now => core.status(g, 'o', mem, { conn: 'convUnit0001', state: 'idle', paused: false }, now, '0.5.7')
     assert.equal(legacyResume(4700)[0], 409)
@@ -691,8 +743,8 @@ try {
     assert.equal(after, before - 1)
   })
   // 直接測共用核心：用 HTTP 塞滿會撞到「加入每小時 10 次」的限流
-  await check('群組最多 10 人（主人 10-11 定案：免費額度要 2 倍餘裕），第 11 人被拒', async () => {
-    assert.equal(MAX_MEMBERS, 10)
+  await check('群組最多 5 人（主人 10-21 定案，SEC064；原本 10-11 定的 10 人作廢），第 6 人被拒', async () => {
+    assert.equal(MAX_MEMBERS, 5)
     const made = await createGroup({ name: 'Owner' }, 0)
     const invite = made.reply[1].invite
     for (let i = 2; i <= MAX_MEMBERS; i++) {
@@ -701,7 +753,7 @@ try {
     const [status, body] = await join(made.g, made.groupId, { invite, name: 'Extra' }, 0)
     assert.equal(status, 403)
     assert.equal(body.error, '群組滿了')
-    assert.equal(Object.keys(made.g.members).length, 10)
+    assert.equal(Object.keys(made.g.members).length, 5)
   })
   // sec-9 模糊測試：固定亂數種子（每次跑都一樣，失敗可以重現）；每個端點 200 個亂七八糟的請求，
   // 只能回 2xx／4xx、不能 500、中繼不能掛，跑完正常請求照常成功
@@ -1071,7 +1123,9 @@ try {
         assert.equal((await req('GET', '/friends', undefined, auth(f), '0.9.0')).status, 200)
         assert.equal(stored(f), '0.9.0', '存檔恢復後，版本沒再變也補寫進去')
         // fix-8：路由自己存檔就丟錯（POST /status 本來就會存）→ 回 400；檔案沒變、版本不記成已寫，恢復後下一個請求補寫
-        const g2 = (await req('POST', '/join', { invite: a.invite, name: 'VerGus' }, undefined, '0.4.0')).data
+        // 群組上限 5 人（SEC064）：後面的人換到第二個群組
+        const a2 = (await req('POST', '/groups', { name: 'VerAnn2' }, undefined, '0.4.0')).data
+        const g2 = (await req('POST', '/join', { invite: a2.invite, name: 'VerGus' }, undefined, '0.4.0')).data
         mkdirSync(data + '.tmp')
         assert.equal((await beat(g2, '0.8.0')).status, 500, '路由自己存檔丟錯 → 500（不是 400：外掛會把 400 當成「中繼不認得 pauseSeq」）')
         assert.equal(stored(g2), '0.4.0', '存檔失敗，資料檔沒變')
@@ -1079,7 +1133,7 @@ try {
         assert.equal((await req('GET', '/friends', undefined, auth(g2), '0.8.0')).status, 200)
         assert.equal(stored(g2), '0.8.0', '恢復後，版本沒再變也補寫進去')
         // fix-7：路由自己沒存的回應（非建立者換邀請碼 → 403）也要把版本存下來
-        const e = (await req('POST', '/join', { invite: a.invite, name: 'VerEve' }, undefined, '0.4.0')).data
+        const e = (await req('POST', '/join', { invite: a2.invite, name: 'VerEve' }, undefined, '0.4.0')).data
         assert.equal((await req('POST', '/invite/rotate', {}, auth(e), '0.6.0')).status, 403)
         assert.equal(stored(e), '0.6.0', '非建立者換邀請碼被擋（403），版本照樣存下來')
       } finally {

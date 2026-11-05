@@ -5,7 +5,16 @@ they are doing with Claude (for example "Fixing bugs · a website"). It never sh
 
 Help & privacy page (what the plugin sends, how to install and remove it): https://friends-status-relay.friends-status-relay.workers.dev/guide
 
+This is a Claude Code plugin: you do not need to run a relay yourself, the official one is already running. Chat (preview) and how the plugin decides who is who in a group are explained on the same page, in the "Chat" section.
+
 [繁體中文說明在下面](#繁體中文)
+
+## How it works
+
+- Your prompt is turned into two codes from a fixed list (`mod/hooks/taxonomy.ts`) on your side.
+  Only the codes, your chosen display name, online state and the plugin's version number go to a small relay server.
+- The relay keeps a group of up to 5 people. Activity codes are deleted after 24 hours.
+- Full details, with pointers to the code: **[SECURITY.md](SECURITY.md)**.
 
 ## Install in 3 steps
 
@@ -54,7 +63,7 @@ with `/friends update`.
 - `/friends pause` stops sharing activity (friends only see whether you are online).
   `/friends hide [folder]` (the current folder if you leave it out): in that folder friends only see
   that you are working, not what kind of work.
-- A group holds up to 10 people. Activity codes are deleted from the relay after 24 hours.
+- A group holds up to 5 people. Activity codes are deleted from the relay after 24 hours.
 - Friends' names are only drawn in the pane. Command replies never contain them, so they never enter
   your conversation with Claude.
 - Each time you start a conversation the plugin asks the relay whether there's a new version, so the relay
@@ -125,6 +134,9 @@ This is a third-party plugin, not an Anthropic product. MIT licensed, see [LICEN
 Claude Code 外掛：在側邊 pane 看到朋友在不在線、正在用 Claude 做**哪一類**事（例如「修錯誤 · 網站」），不會分享對話內容。
 
 說明與隱私頁面（外掛送出什麼、怎麼安裝、怎麼移除）：https://friends-status-relay.friends-status-relay.workers.dev/guide
+- 你送出的訊息會在你這邊被分成固定清單裡的兩個代碼（`mod/hooks/taxonomy.ts`），只有代碼、你取的名字、在線狀態和外掛版本號會送到中繼。
+- 一個群組最多 5 人，動態 24 小時後刪除。
+- 讀了什麼、送了什麼、跑了什麼，每一條都附程式碼位置：**[SECURITY.md](SECURITY.md)**（英文）。
 
 ## 三步安裝
 
@@ -158,7 +170,7 @@ Claude 對來路不明的外掛謹慎是好事。原始碼就公開在這裡，�
 
 - 兩個代碼怎麼來的：你的訊息先在你的電腦上遮掉敏感字（金鑰、密碼、email、網址、路徑、檔名、IP 位址、長數字和程式碼換成泛稱；只看前 4000 字、最多留 1500 字），再交給你正在用的 Claude 從清單挑兩個代碼。送到中繼的只有代碼。
 - `/friends pause` 暫停分享動態（朋友只看得到你在不在線）；`/friends hide [資料夾]`（不寫就是目前的資料夾）：在那個資料夾裡，朋友只看得到你在工作，看不到哪一類事。
-- 一個群組最多 10 人；動態代碼在中繼上 24 小時後刪除。
+- 一個群組最多 5 人；動態代碼在中繼上 24 小時後刪除。
 - 朋友的名字只畫在 pane 上，指令的回覆裡不會有，所以不會進到你和 Claude 的對話。
 - 外掛每次開對話都會向中繼查一次有沒有新版，所以中繼看得到你的 IP 和開對話的時間；這個沒有開關，退出群組後也會繼續，要停就移除外掛。
 - 公開中繼的使用名額接近 1,000 個時，會停止新建和加入群組；原有群組照常使用，也可以改用自架中繼。

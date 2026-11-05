@@ -1,7 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 import {
   buildDiagnostics,
+  diagCopied,
   diagStrings,
+  diagToast,
+  diagWho,
   DIAG_OS_VALUES,
   DIAG_RELAY_KIND_VALUES,
   DIAG_STRINGS,
@@ -234,7 +237,7 @@ test('不改傳入物件（先 Object.freeze）', () => {
 })
 
 test('DIAG_STRINGS 兩種語言每個鍵都在、非空', () => {
-  const keys = ['button', 'buttonName', 'hint', 'copied', 'copyFailed', 'contents']
+  const keys = ['button', 'buttonName', 'hint', 'copied', 'copiedNextMember', 'copiedNextOther', 'copyFailed', 'contents']
   for (const lang of ['en', 'zh-TW'] as const) {
     for (const key of keys) {
       const value = DIAG_STRINGS[lang][key as keyof (typeof DIAG_STRINGS)['en']]
@@ -248,7 +251,11 @@ test('DIAG_STRINGS 格數在上限內', () => {
   expect(cellWidth(DIAG_STRINGS.en.button)).toBeLessThanOrEqual(17)
   expect(cellWidth(DIAG_STRINGS['zh-TW'].button)).toBeLessThanOrEqual(12)
   expect(cellWidth(DIAG_STRINGS.en.copied)).toBeLessThanOrEqual(90)
-  expect(cellWidth(DIAG_STRINGS['zh-TW'].copied)).toBeLessThanOrEqual(75)
+  expect(cellWidth(DIAG_STRINGS['zh-TW'].copied)).toBeLessThanOrEqual(70)
+  expect(cellWidth(DIAG_STRINGS.en.copiedNextMember)).toBeLessThanOrEqual(70)
+  expect(cellWidth(DIAG_STRINGS['zh-TW'].copiedNextMember)).toBeLessThanOrEqual(40)
+  expect(cellWidth(DIAG_STRINGS.en.copiedNextOther)).toBeLessThanOrEqual(70)
+  expect(cellWidth(DIAG_STRINGS['zh-TW'].copiedNextOther)).toBeLessThanOrEqual(40)
   expect(cellWidth(DIAG_STRINGS.en.hint)).toBeLessThanOrEqual(75)
   expect(cellWidth(DIAG_STRINGS['zh-TW'].hint)).toBeLessThanOrEqual(75)
 })
@@ -258,15 +265,15 @@ test('繁中按鈕文字是出問題了', () => {
 })
 
 test('contents 與固定承諾句 D1 逐字相等', () => {
-  expect(DIAG_STRINGS.en.contents).toBe('It has only the plugin version, your system, and an error code. It has no conversation, names, or group name.')
-  expect(DIAG_STRINGS['zh-TW'].contents).toBe('只有外掛版本、你的系統和錯誤代碼，沒有對話內容、名字或群組名。')
+  expect(DIAG_STRINGS.en.contents).toBe('It has only the plugin version, your system, a few settings, and error codes. It has no conversation, names, or group name.')
+  expect(DIAG_STRINGS['zh-TW'].contents).toBe('只有外掛版本、你的系統、幾項設定狀態和錯誤代碼，沒有對話內容、名字或群組名。')
 })
 
-test('copied 同時說到已複製和可以貼給朋友', () => {
-  expect(DIAG_STRINGS.en.copied).toContain('copied')
-  expect(DIAG_STRINGS.en.copied).toContain('friend')
-  expect(DIAG_STRINGS['zh-TW'].copied).toContain('複製')
-  expect(DIAG_STRINGS['zh-TW'].copied).toContain('朋友')
+test('copied 說的是診斷資訊已複製，而且不含「邀請」', () => {
+  expect(DIAG_STRINGS.en.copied).toContain('Diagnostics copied')
+  expect(DIAG_STRINGS.en.copied.toLowerCase()).not.toContain('invit')
+  expect(DIAG_STRINGS['zh-TW'].copied).toContain('診斷資訊已複製')
+  expect(DIAG_STRINGS['zh-TW'].copied).not.toContain('邀請')
 })
 
 test('hint 說到貼給邀請你的朋友或貼到問題頁', () => {
@@ -296,8 +303,15 @@ test('DIAG_STRINGS 不含禁字', () => {
     'always',
     'delete',
     '刪除',
+    'end-to-end',
+    'guarantee',
+    'absolutely',
+    'permanent',
+    'permanently',
+    'deleted',
+    '安全',
   ]
-  const keys = ['button', 'buttonName', 'hint', 'copied', 'copyFailed', 'contents']
+  const keys = ['button', 'buttonName', 'hint', 'copied', 'copiedNextMember', 'copiedNextOther', 'copyFailed', 'contents']
   for (const lang of ['en', 'zh-TW'] as const) {
     for (const key of keys) {
       const value = DIAG_STRINGS[lang][key as keyof (typeof DIAG_STRINGS)['en']]
@@ -312,4 +326,103 @@ test('diagStrings 回傳對應語言的字串組', () => {
   expect(diagStrings('en')).toEqual(DIAG_STRINGS.en)
   expect(diagStrings('zh-TW')).toEqual(DIAG_STRINGS['zh-TW'])
   expect(diagStrings('en').button).toBe("Something's wrong")
+})
+
+test('D1、D2、D3、D4 與卡片逐字相等', () => {
+  expect(DIAG_STRINGS.en.contents).toBe('It has only the plugin version, your system, a few settings, and error codes. It has no conversation, names, or group name.')
+  expect(DIAG_STRINGS['zh-TW'].contents).toBe('只有外掛版本、你的系統、幾項設定狀態和錯誤代碼，沒有對話內容、名字或群組名。')
+  expect(DIAG_STRINGS.en.copied).toBe('Diagnostics copied (version, system, settings and error codes; no conversation or names).')
+  expect(DIAG_STRINGS['zh-TW'].copied).toBe('診斷資訊已複製（版本、系統、設定狀態和錯誤代碼，沒有對話和名字）。')
+  expect(DIAG_STRINGS.en.copiedNextMember).toBe('Paste it to the friend who invited you, or on the issue page.')
+  expect(DIAG_STRINGS['zh-TW'].copiedNextMember).toBe('貼給邀請你的朋友，或貼到問題頁。')
+  expect(DIAG_STRINGS.en.copiedNextOther).toBe('Paste it on the issue page, or give it to Claude to look at.')
+  expect(DIAG_STRINGS['zh-TW'].copiedNextOther).toBe('貼到問題頁，或貼給 Claude 幫你看。')
+})
+
+test('diagWho 只在已加入且不是群主時回 member', () => {
+  expect(diagWho(true, false)).toBe('member')
+  expect(diagWho(true, true)).toBe('other')
+  expect(diagWho(false, false)).toBe('other')
+  expect(diagWho(false, true)).toBe('other')
+  expect(diagWho(false, undefined)).toBe('other')
+  expect(diagWho(undefined, undefined)).toBe('other')
+  expect(diagWho(null, null)).toBe('other')
+  expect(diagWho('true', 'false')).toBe('other')
+  expect(diagWho(1, 0)).toBe('other')
+  expect(diagWho({}, [])).toBe('other')
+})
+
+test('diagWho 傳物件、陣列、函式、Symbol 也不丟例外', () => {
+  const weird: unknown[] = [{}, [], () => 0, Symbol('x')]
+  for (const value of weird) {
+    expect(() => diagWho(value, value)).not.toThrow()
+    expect(diagWho(value, value)).toBe('other')
+  }
+})
+
+test('diagCopied 成員用 D3、其他身分用 D4，英文加空白、繁中不加', () => {
+  for (const lang of ['en', 'zh-TW'] as const) {
+    const strings = DIAG_STRINGS[lang]
+    const join = lang === 'zh-TW' ? '' : ' '
+    expect(diagCopied(lang, 'member')).toBe(strings.copied + join + strings.copiedNextMember)
+    expect(diagCopied(lang, 'other')).toBe(strings.copied + join + strings.copiedNextOther)
+  }
+})
+
+test('diagCopied 不是 member 的身分一律當 other', () => {
+  expect(diagCopied('en', 'x' as any)).toBe(DIAG_STRINGS.en.copied + ' ' + DIAG_STRINGS.en.copiedNextOther)
+  expect(diagCopied('zh-TW', undefined as any)).toBe(DIAG_STRINGS['zh-TW'].copied + DIAG_STRINGS['zh-TW'].copiedNextOther)
+})
+
+test('diagCopied 不是 en 或 zh-TW 的語言一律當英文', () => {
+  for (const lang of ['fr', 'toString', '__proto__', 'constructor'] as const) {
+    expect(diagCopied(lang as any, 'member')).toBe(DIAG_STRINGS.en.copied + ' ' + DIAG_STRINGS.en.copiedNextMember)
+    expect(diagCopied(lang as any, 'other')).toBe(DIAG_STRINGS.en.copied + ' ' + DIAG_STRINGS.en.copiedNextOther)
+  }
+})
+
+test('diagToast 複製成功回整段提示、其他值回 copyFailed', () => {
+  for (const lang of ['en', 'zh-TW'] as const) {
+    for (const who of ['member', 'other'] as const) {
+      expect(diagToast(lang, who, true)).toBe(diagCopied(lang, who))
+      for (const bad of [false, undefined, 'true', 1] as const) {
+        expect(diagToast(lang, who, bad)).toBe(DIAG_STRINGS[lang].copyFailed)
+      }
+    }
+  }
+})
+
+test('diagToast 語言不是 en 或 zh-TW 時當英文', () => {
+  for (const lang of ['fr', 'toString'] as const) {
+    expect(diagToast(lang as any, 'member', true)).toBe(diagCopied('en', 'member'))
+    expect(diagToast(lang as any, 'other', false)).toBe(DIAG_STRINGS.en.copyFailed)
+  }
+})
+
+test('身分差異：成員那句說邀請你的朋友，群主那句不說邀請但說問題頁與 Claude', () => {
+  expect(diagCopied('en', 'member')).toContain('invited you')
+  expect(diagCopied('zh-TW', 'member')).toContain('邀請你的朋友')
+  expect(diagCopied('en', 'other').toLowerCase()).not.toContain('invit')
+  expect(diagCopied('zh-TW', 'other')).not.toContain('邀請')
+  expect(diagCopied('en', 'other')).toContain('issue page')
+  expect(diagCopied('en', 'other')).toContain('Claude')
+  expect(diagCopied('zh-TW', 'other')).toContain('問題頁')
+  expect(diagCopied('zh-TW', 'other')).toContain('Claude')
+})
+
+test('diagCopied 整段格數在上限內、且不含介面禁字', () => {
+  for (const lang of ['en', 'zh-TW'] as const) {
+    for (const who of ['member', 'other'] as const) {
+      const text = diagCopied(lang, who)
+      const limit = lang === 'zh-TW' ? 100 : 155
+      expect(cellWidth(text)).toBeLessThanOrEqual(limit)
+    }
+  }
+  for (const who of ['member', 'other'] as const) {
+    expect(/\bpane\b/.test(diagCopied('en', who))).toBe(false)
+    expect(diagCopied('zh-TW', who)).not.toContain('pane')
+    expect(diagCopied('zh-TW', who)).not.toContain('中繼')
+    expect(diagCopied('zh-TW', who)).not.toContain('釘選')
+    expect(diagCopied('zh-TW', who)).not.toContain('membership')
+  }
 })

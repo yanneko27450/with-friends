@@ -101,6 +101,8 @@ export const DIAG_STRINGS: Record<Lang, {
   buttonName: string
   hint: string
   copied: string
+  copiedNextMember: string
+  copiedNextOther: string
   copyFailed: string
   contents: string
 }> = {
@@ -112,11 +114,15 @@ export const DIAG_STRINGS: Record<Lang, {
     /** 按鈕旁的小字：會複製一小段資訊、可以貼去哪裡 */
     hint: 'Copies a short text to paste to your inviting friend or the issue page.',
     /** 複製成功時顯示的提示 */
-    copied: 'Diagnostics copied. Paste it to the friend who invited you.',
+    copied: 'Diagnostics copied (version, system, settings and error codes; no conversation or names).',
+    /** 複製成功後的下一句：已加入的成員（有邀請人） */
+    copiedNextMember: 'Paste it to the friend who invited you, or on the issue page.',
+    /** 複製成功後的下一句：群主與沒加入的人（沒有邀請人可貼） */
+    copiedNextOther: 'Paste it on the issue page, or give it to Claude to look at.',
     /** 複製失敗時顯示的提示，只說再按一次、不說原因 */
     copyFailed: 'Not copied. Please press the button again.',
     /** 診斷文字裡有什麼（固定承諾句 D1） */
-    contents: 'It has only the plugin version, your system, and an error code. It has no conversation, names, or group name.',
+    contents: 'It has only the plugin version, your system, a few settings, and error codes. It has no conversation, names, or group name.',
   },
   'zh-TW': {
     /** 「出問題了」按鈕的文字 */
@@ -126,14 +132,39 @@ export const DIAG_STRINGS: Record<Lang, {
     /** 按鈕旁的小字：會複製一小段資訊、可以貼去哪裡 */
     hint: '會複製一小段診斷資訊，你可以貼給邀請你的朋友，或貼到問題頁。',
     /** 複製成功時顯示的提示 */
-    copied: '已複製，你可以貼給邀請你的朋友。',
+    copied: '診斷資訊已複製（版本、系統、設定狀態和錯誤代碼，沒有對話和名字）。',
+    /** 複製成功後的下一句：已加入的成員（有邀請人） */
+    copiedNextMember: '貼給邀請你的朋友，或貼到問題頁。',
+    /** 複製成功後的下一句：群主與沒加入的人（沒有邀請人可貼） */
+    copiedNextOther: '貼到問題頁，或貼給 Claude 幫你看。',
     /** 複製失敗時顯示的提示，只說再按一次、不說原因 */
     copyFailed: '沒複製成功，請再按一次。',
     /** 診斷文字裡有什麼（固定承諾句 D1） */
-    contents: '只有外掛版本、你的系統和錯誤代碼，沒有對話內容、名字或群組名。',
+    contents: '只有外掛版本、你的系統、幾項設定狀態和錯誤代碼，沒有對話內容、名字或群組名。',
   },
 }
 
 export function diagStrings(lang: Lang): (typeof DIAG_STRINGS)['en'] {
   return DIAG_STRINGS[lang]
+}
+
+export type DiagWho = 'member' | 'other'
+
+/** 誰按的按鈕：已加入群組而且不是群主＝'member'（有邀請人）；群主、沒加入、值讀不到或型別不對，一律 'other'（沒加入也歸 other：沒有邀請人可貼）。參數是 unknown，什麼值都不能丟例外 */
+export function diagWho(isInGroup: unknown, isOwner: unknown): DiagWho {
+  return isInGroup === true && isOwner === false ? 'member' : 'other'
+}
+
+/** 複製成功時整段提示：copied ＋（英文一個空白／繁中不加）＋ 依身分的下一句；who 不是 'member' 一律當 'other'；lang 只認 'zh-TW'，其他當 'en'（不用索引取值，免得原型屬性漏進來） */
+export function diagCopied(lang: Lang, who: DiagWho): string {
+  const zh = lang === 'zh-TW'
+  const strings = zh ? DIAG_STRINGS['zh-TW'] : DIAG_STRINGS.en
+  const next = who === 'member' ? strings.copiedNextMember : strings.copiedNextOther
+  return zh ? strings.copied + next : strings.copied + ' ' + next
+}
+
+/** 複製按鈕按完之後要顯示的整段提示：isCopied 嚴格等於 true 才是成功句，其他任何值都是 copyFailed */
+export function diagToast(lang: Lang, who: DiagWho, isCopied: unknown): string {
+  if (isCopied === true) return diagCopied(lang, who)
+  return (lang === 'zh-TW' ? DIAG_STRINGS['zh-TW'] : DIAG_STRINGS.en).copyFailed
 }

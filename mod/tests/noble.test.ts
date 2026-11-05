@@ -1,6 +1,11 @@
 import { expect, test } from 'claude-code/testing'
 
-import { nobleEd25519Verify, nobleSha512 } from '../hooks/noble-crypto.js'
+import {
+  nobleEd25519Verify,
+  nobleSha512,
+  nobleXChaCha20Poly1305Decrypt,
+  nobleXChaCha20Poly1305Encrypt,
+} from '../hooks/noble-crypto.js'
 
 const hex = (value: string): Uint8Array => {
   const clean = value.replaceAll(' ', '').replaceAll('\n', '')
@@ -127,4 +132,17 @@ test('noble SHA-512 matches RFC 6234 standard vectors', () => {
   }
   const millionAs = new Uint8Array(1_000_000).fill(0x61)
   expect(toHex(nobleSha512(millionAs))).toBe('e718483d0ce769644e2e42c7bc15b4638e1f98b13b2044285632a803afa973ebde0ff244877ea60a4cb0432ce577c31beb009c5c2c49aa2e4eadb217ad8cc09b')
+})
+
+test('vendored noble ciphers matches Wycheproof XChaCha20-Poly1305 KTV', () => {
+  const key = hex('808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f')
+  const nonce = hex('404142434445464748494a4b4c4d4e4f5051525354555657')
+  const aad = hex('50515253c0c1c2c3c4c5c6c7')
+  const plaintext = hex('4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e')
+  const ciphertext = hex('bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b4522f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff921f9664c97637da9768812f615c68b13b52ec0875924c1c7987947deafd8780acf49')
+  expect(toHex(nobleXChaCha20Poly1305Encrypt(key, nonce, plaintext, aad))).toBe(toHex(ciphertext))
+  expect(toHex(nobleXChaCha20Poly1305Decrypt(key, nonce, ciphertext, aad))).toBe(toHex(plaintext))
+  const altered = ciphertext.slice()
+  altered[altered.length - 1] = altered[altered.length - 1]! ^ 1
+  expect(() => nobleXChaCha20Poly1305Decrypt(key, nonce, altered, aad)).toThrow()
 })

@@ -14,6 +14,22 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    version: '0.6.0',
+    date: '2026-11-05',
+    items: {
+      'zh-TW': [
+        '新增加密聊天（預覽）：同組朋友可群聊，也能一對一私訊。',
+        '邀請改成只能貼進面板的一段字串，加入時由群主確認名單。',
+        '聊天是預覽版，沒有前向保密；詳情看說明網頁。',
+      ],
+      en: [
+        'Encrypted chat (preview): group chat and one-to-one messages.',
+        'Invites are now one string you paste into the panel.',
+        'Chat is a preview without forward secrecy; see the help page.',
+      ],
+    },
+  },
+  {
     version: '0.5.8',
     date: '2026-11-01',
     items: {

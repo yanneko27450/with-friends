@@ -1,5 +1,27 @@
 export type Presence = 'working' | 'idle' | 'offline'
 
+/** CHAT-4W：聊天分頁的記憶體 atom（with-friends/chat）。這裡是型別，hooks/chat-view.ts 有同形狀的 ChatViewState（tsc 會檢查兩邊互相可指派）；聊天文字只存在這個 atom 裡 */
+export type ChatMessageView = Readonly<{ id: string; senderId: string; senderName: string; isMe: boolean; sentAt: number; receivedAt: number; text: string }>
+export type ChatDmRowView = Readonly<{ peerId: string; peerName: string; state: 'active' | 'requested' | 'incoming' | 'blocked' | 'none'; code: string; unread: number; muted: boolean }>
+export type ChatView = Readonly<{
+  availability: 'checking' | 'not-in-group' | 'relay-unsupported' | 'relay-bad' | 'peers-old' | 'setup-needed' | 'other-session' | 'ready'
+  mode: 'group' | 'dm-list' | 'dm-thread'
+  threadCode: string
+  messages: readonly ChatMessageView[]
+  dmMessages: Readonly<Record<string, readonly ChatMessageView[]>>
+  dms: readonly ChatDmRowView[]
+  unread: number
+  state: 'loading' | 'empty' | 'aloneInGroup' | 'unavailable' | 'unreachable' | 'sendFailed' | 'tooLong' | 'notInGroup' | 'secretHint' | null
+  over: number
+  inputGen: number
+  readUpTo: Readonly<Record<string, number>>
+  previewMore: boolean
+  /** 成員代號 → 顯示名字（隨名單更新；訊息裡的 senderName 是收到當時的快照，畫面以這裡為準） */
+  names: Readonly<Record<string, string>>
+  clockWarning: boolean
+  stalledCodes: readonly string[]
+}>
+
 /** 中繼回的好友。action／subject 是代碼（可能是比我新的版本的代碼），顯示時用 activityText 翻。 */
 export type Friend = {
   id: string
@@ -73,6 +95,7 @@ declare module 'claude-code' {
       whatsNew: WhatsNewView
       removed: boolean
       demoHidden: boolean
+      chat: ChatView
     }
   }
 }

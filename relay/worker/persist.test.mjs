@@ -33,6 +33,10 @@ function fakeStorage() {
       s.puts += 1
       for (const [k, v] of Object.entries(values)) data.set(k, structuredClone(v))
     },
+    // CHAT3-RELAY：私訊信箱存在 dm:<代碼> 鍵（list 找出來、delete／transaction 一起刪）
+    async list({ prefix = '' } = {}) { return new Map([...data].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k, structuredClone(v)])) },
+    async delete(keys) { for (const k of Array.isArray(keys) ? keys : [keys]) data.delete(k) },
+    async transaction(fn) { return fn({ put: values => s.put(values), delete: keys => s.delete(keys) }) },
     async setAlarm() { if (s.failAlarm) throw new Error('alarm fault (test)') }, async deleteAlarm() {}, async deleteAll() { data.clear() },
   }
   return s

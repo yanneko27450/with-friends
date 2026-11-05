@@ -8,6 +8,9 @@ import { TEST_RESPONSE_SIGNING } from '../test-fixtures/response-signing-key.mjs
 const here = fileURLToPath(new URL('.', import.meta.url))
 const wrangler = join(here, 'node_modules', 'wrangler', 'bin', 'wrangler.js')
 
+// 測試用的 wrangler 不帶主人的 Cloudflare 帳號：CF_*／CLOUDFLARE_* 環境變數（API token、帳號 id）一律不傳進去，加上空的 XDG_CONFIG_HOME，本機 wrangler dev 不可能用到真帳號
+const envWithoutCloudflareAccount = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CF_|CLOUDFLARE_)/i.test(key)))
+
 export async function startWorker(vars = {}, options = {}) {
   const persist = options.persist ?? mkdtempSync(join(tmpdir(), 'friends-worker-test-'))
   const port = 22000 + Math.floor(Math.random() * 10000)
@@ -23,7 +26,7 @@ export async function startWorker(vars = {}, options = {}) {
   for (const [key, value] of Object.entries(allVars)) args.push('--var', `${key}:${value}`)
   const child = spawn(process.execPath, args, {
     cwd: here, stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, XDG_CONFIG_HOME: join(persist, 'xdg') },
+    env: { ...envWithoutCloudflareAccount(), XDG_CONFIG_HOME: join(persist, 'xdg'), WRANGLER_SEND_METRICS: 'false' },
   })
   child.stderr.on('data', data => { stderr += data })
   for (let i = 0; i < 60; i++) {

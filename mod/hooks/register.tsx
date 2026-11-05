@@ -12,8 +12,9 @@ import { AVATAR_EMOJI, avatarSvg, fillIndexFor } from './avatar'
 import { isDemoBot, withDemoBot } from './demo-bot'
 import { SOURCE_URL, t } from './i18n'
 import type { Strings } from './i18n'
-import { buildDiagnostics, diagStrings, errorCodeFromStatus } from './diagnostics'
+import { buildDiagnostics, diagStrings, diagToast, diagWho, errorCodeFromStatus } from './diagnostics'
 import type { DiagInput } from './diagnostics'
+import { busyLine } from './friend-busy'
 import { redact } from './redact'
 import { ACTION_LABEL, ACTIONS, activityText, AVATARS, isAction, isAvatar, isSubject, LANGS, SUBJECT_LABEL, SUBJECTS } from './taxonomy'
 import type { Action, Avatar, Lang, Subject } from './taxonomy'
@@ -21,10 +22,17 @@ import { cleanName, isValidNameInput } from './text'
 import { failureFromError, failureFromRun, failureOf, installedScope, isJsonUnsupported, reasonCode, REASON_STRINGS, updateArgs } from './update-reason'
 import type { InstallScope, UpdateFailure } from './update-reason'
 import { fromB64url, isResponsePublicKey, newResponseNonce, OFFICIAL_RESPONSE_KEYS, verifyRelaySignature } from './response-signing'
+import { formatUnreadBadge } from './chat-unread'
+import { CHAT_PANE_ID, INITIAL_CHAT_VIEW } from './chat-view'
+import { chatInviteText, chatNoteRemoved, chatPaneClosed, chatProvision, chatSessionEnd, chatSessionStart, chatWipe, registerChat, setChatVersion } from './chat-register'
+import { parseWf1 } from './chat-members'
+import type { Wf1Invite } from './chat-members'
+import { CHAT_STRINGS } from './chat-strings'
+import { DEFAULT_RELAY, isSecureRelay, isToken, membershipOf, relayOrigin } from './relay-url'
 
 const PANE = 'friends'
-/** 官方中繼（ui-18 D：原本是本機開發用的 127.0.0.1:8789，新使用者直接 create 會失敗） */
-export const DEFAULT_RELAY = 'https://friends-status-relay.friends-status-relay.workers.dev'
+// CHAT-4W：這幾個純函式搬到 relay-url.ts（聊天接線模組也要用，hook 模組之間不互相 import）；名字原樣再匯出，既有的 import 不用改
+export { DEFAULT_RELAY, isSecureRelay, membershipOf, relayOrigin }
 /** 說明頁網址（0.5.8，B4-02）：官方中繼的 /guide（M-6 彙整寫死這個路徑；路徑是否正確由實作部驗） */
 export const GUIDE_URL = `${DEFAULT_RELAY}/guide`
 /** 回報問題網址（0.5.8，B4-02）：公開 repo 的問題頁 */
@@ -44,6 +52,8 @@ const me = atom({ plugin: 'with-friends', key: 'me' } as const, {
 const net = atom({ plugin: 'with-friends', key: 'net' } as const, { isOk: true, error: '', at: 0, code: null } as Net)
 const group = atom({ plugin: 'with-friends', key: 'group' } as const, null as GroupView | null)
 const lang = atom({ plugin: 'with-friends', key: 'lang' } as const, 'en' as Lang)
+// CHAT-4W：聊天分頁的 atom（這個檔案只讀 unread 這個數字；寫的是 chat-register.tsx，兩邊宣告的是同一個 plugin／key）
+const chatAtom = atom({ plugin: 'with-friends', key: 'chat' } as const, INITIAL_CHAT_VIEW)
 const upd = atom({ plugin: 'with-friends', key: 'update' } as const, { latest: '', state: 'idle' } as UpdateView)
 const whatsNew = atom({ plugin: 'with-friends', key: 'whatsNew' } as const, { isOpen: false } as WhatsNewView)
 const removed = atom({ plugin: 'with-friends', key: 'removed' } as const, false)
@@ -88,6 +98,12 @@ const PAUSE_SEQ_RETRY_MS = 120_000
 /** 連續幾次「帶序號被 400、拿掉序號才成功」之後，就當這是不認得序號的舊中繼（不是暫時性錯誤）：沒帶序號的「繼續」也算送達 */
 let pauseSeqFallbacks = 0
 const PAUSE_SEQ_OLD_RELAY_AFTER = 3
+/** 0.6.0：paused 和 pauseState 不吻合持續這麼久（＝舊版對話只改了 paused，不是新版按到一半）→ 改送沒序號的「繼續」，中繼的緩衝期（20 秒）本來就擋得住亂序 */
+const MISMATCH_RESEND_MS = 15_000
+let mismatchSince = 0
+/** 連續幾次「我的暫停被中繼當舊的忽略、序號加上去重送」之後就不再加（中繼壞了或有惡意） */
+let pauseBumps = 0
+const PAUSE_BUMPS_MAX = 3
 let invalidResponseFailures = 0
 let invalidResponseRetryAt = -Infinity
 /** 同一個 hooks 模組實例內，所有 membership read-check-write/delete 共用的 critical section。 */
@@ -116,25 +132,6 @@ async function responseTrust($: EngineInterface, origin: string): Promise<{ keyI
   return pin && /^[A-Za-z0-9._-]{1,64}$/.test(pin.keyId) && isResponsePublicKey(pin.publicKey) ? pin : null
 }
 
-/**
- * L-18：store 裡的成員資料只在「少了就完全不能用」的四個欄位都對時才算在群組裡（中繼網址、群組代號、成員代號、金鑰）。
- * 壞掉的（例如 {}、字串、少了金鑰）當成沒加入：不然 create／join 會被 sec-14 擋住、心跳一直失敗，只能 leave --force 救。
- * 其他欄位缺了就補預設值。這純屬防禦：0.3.3 起每一版存的都是同樣八個欄位、代碼都是中繼發的 base64url（L-18 審查查過全部歷史），
- * 但萬一有少欄位的資料，也不能把它當成沒加入（那樣會讓人不知不覺被登出、名字留在中繼上）
- */
-export function membershipOf(v: unknown): Membership | undefined {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
-  const o = v as Record<string, unknown>
-  if (typeof o.relay !== 'string' || !o.relay || !isToken(o.groupId) || !isToken(o.memberId) || !isToken(o.memberKey)) return undefined
-  return {
-    relay: o.relay, groupId: o.groupId, memberId: o.memberId, memberKey: o.memberKey,
-    invite: typeof o.invite === 'string' ? o.invite : '',
-    inviteGeneration: typeof o.inviteGeneration === 'number' && Number.isSafeInteger(o.inviteGeneration) && o.inviteGeneration >= 0 ? o.inviteGeneration : 0,
-    groupName: typeof o.groupName === 'string' ? o.groupName : '',
-    isOwner: o.isOwner === true,
-    name: typeof o.name === 'string' ? o.name : '',
-  }
-}
 async function getMembership($: EngineInterface): Promise<Membership | undefined> {
   return membershipOf(await $.store.get('membership'))
 }
@@ -147,7 +144,12 @@ const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCas
  * 邀請字串（relay-5）：「中繼網址#邀請碼」，朋友貼一次就好，不用先設中繼；
  * 也收舊格式的純邀請碼（用目前設定的中繼）。網址只收 http(s)，其他一律當格式錯
  */
-export function parseInvite(raw: string, fallbackRelay: string): { relay: string; invite: string } | null {
+export function parseInvite(raw: string, fallbackRelay: string, options: { allowWf1?: boolean } = {}): { relay: string; invite: string; wf1?: Wf1Invite } | null {
+  // CHAT-6：wf1: 邀請（帶群主身分和這份邀請專屬的秘密）只收從 pane 貼進來的；指令的參數會進對話，所以指令那條路不收
+  if (/^wf1:/i.test(raw.trim())) {
+    const wf1 = options.allowWf1 === true ? parseWf1(raw) : null
+    return wf1 ? { relay: wf1.relay, invite: wf1.invite, wf1 } : null
+  }
   // 複製出去的是「/friends join <連結>」：整行貼進 pane 也收
   const joinCmd = /^\/friends\s+join\s+(\S+)/i.exec(raw.trim())
   if (joinCmd) raw = joinCmd[1]!
@@ -162,11 +164,6 @@ export function parseInvite(raw: string, fallbackRelay: string): { relay: string
 export const inviteLink = (relay: string, invite: string) => `${relay.replace(/\/+$/, '')}#${invite}`
 export const joinLine = (link: string) => `/friends join ${link}`
 export const marketplaceUrl = (relay: string) => `${relay.replace(/\/+$/, '')}/marketplace.json`
-/** 中繼網址只留「協定＋主機＋埠」；舊版存下的網址有路徑、帳密之類就回 null（sec-6a） */
-export function relayOrigin(relay: string): string | null {
-  const m = /^(https?:\/\/[A-Za-z0-9.-]{1,253}(?::\d{1,5})?)(?:\/|$)/.exec(relay)
-  return m ? m[1]! : null
-}
 /** 只回傳列舉值；輸入的字串絕不原樣輸出 */
 export function osFamilyOf(v: { os?: unknown; appdata?: unknown; home?: unknown }): 'windows' | 'mac' | 'linux' | 'unknown' {
   if (v.os === 'Windows_NT' || (typeof v.appdata === 'string' && v.appdata !== '')) return 'windows'
@@ -174,24 +171,6 @@ export function osFamilyOf(v: { os?: unknown; appdata?: unknown; home?: unknown 
   if (typeof v.home === 'string' && v.home.startsWith('/home/')) return 'linux'
   return 'unknown'
 }
-/**
- * sec-15：只跟 https 中繼說話；http 只放行本機（localhost、127.0.0.1，開發測試用）。
- * http 會讓成員金鑰（每個請求的 authorization）在網路上明碼跑。http 的主機名照 relayOrigin 的規則（不收 IPv6、帳密），
- * 所以 [::1] 也不放行（以前 parseInvite／relayOrigin 就不收 IPv6，不為了這張放寬）
- */
-export function isSecureRelay(relay: string): boolean {
-  // sec-16（sec-15 審查建議 2）：https 也要驗主機格式。以前 https 只看開頭，帶帳密（https://user:pw@x）、
-  // 空的或 - 開頭的標籤、超過 65535 的埠也會被拿去 fetch
-  const origin = relayOrigin(relay)
-  const m = origin ? /^(https?):\/\/([^:/]+)(?::(\d+))?$/.exec(origin) : null
-  if (!m || !isHostname(m[2]!)) return false
-  if (m[3] !== undefined && (Number(m[3]) < 1 || Number(m[3]) > 65535)) return false
-  if (m[1] === 'https') return true
-  const host = m[2]!.toLowerCase()
-  return host === 'localhost' || host === '127.0.0.1'
-}
-/** 主機名：用點分開的每一段 1～63 個英數字或「-」，不以「-」開頭結尾；不收空的段（a..b、結尾的點） */
-const isHostname = (h: string) => h.length <= 253 && h.split('.').every(l => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(l))
 
 export function isHiddenDir(cwd: string, dirs: string[]): boolean {
   const c = norm(cwd)
@@ -212,9 +191,6 @@ export class RelayError extends Error {
 /** 給人看的錯誤：一律是 i18n 裡的固定句子 */
 export const errorText = (err: unknown, s: Strings) => s.relayError(err instanceof RelayError ? err.status : -2)
 
-// 中繼產生的 id、金鑰、邀請碼都是 base64url 加「.」（relay/core.mjs token／newInvite）
-const TOKEN_RE = /^[\w.-]{1,200}$/
-const isToken = (v: unknown): v is string => typeof v === 'string' && TOKEN_RE.test(v)
 
 /**
  * sec-16b B：逐端點檢查成功回應的最低契約。失敗一律當作格式錯誤，不採用任何欄位。
@@ -228,6 +204,9 @@ export function isValidRelayResponse(path: string, data: any, auth?: Membership)
   }
   if (path === '/status' || path === '/friends') {
     if (!auth || !Array.isArray(data.members)) return false
+    // 0.6.0：/status 的回應可以帶自己的 paused／pauseSeq（兩個一起、型別要對）；帶了但不對的回應不採用
+    if (path === '/status' && ('paused' in data || 'pauseSeq' in data)
+      && !(typeof data.paused === 'boolean' && Number.isSafeInteger(data.pauseSeq) && data.pauseSeq >= 0)) return false
     const mine = data.members.filter((v: unknown) => typeof v === 'object' && v !== null && (v as any).id === auth.memberId)
     if (mine.length !== 1 || (mine[0] as any).isMe !== true || typeof (mine[0] as any).isOwner !== 'boolean') return false
     return data.members.every((v: unknown) => {
@@ -543,6 +522,7 @@ async function setAvatar($: EngineInterface, a: Avatar) {
   isAvatarSent = false
   pauseSeqSkipUntil = 0
   pauseSeqFallbacks = 0
+  pauseBumps = 0
   void tick($, true)
 }
 /** pane 的「換頭像」：問答框最多 4 個選項，所以先挑一組（4 個表情符號），再從那組挑一個；在「其他」打代碼也可以 */
@@ -667,6 +647,7 @@ async function setGroup($: EngineInterface, m: Membership | undefined) {
   isAvatarSent = false
   pauseSeqSkipUntil = 0
   pauseSeqFallbacks = 0
+  pauseBumps = 0
   // 新群組可能在別的中繼：等它回了再算（ver-2）
   relayMinVersion = ''
   await update($, group, () => (m ? { name: m.groupName, invite: m.invite, isOwner: m.isOwner, relay: m.relay } : null))
@@ -705,6 +686,9 @@ export async function tick($: EngineInterface, force = false) {
     let cur = await read($, me)
     // 別的對話可能按了暫停／繼續。paused 和序號一起讀，而且要互相吻合才帶序號（見 readPauseState）
     const ps = await readPauseState($)
+    if (!ps.isMismatch) mismatchSince = 0
+    else if (mismatchSince === 0) mismatchSince = now
+    const isMismatchStale = ps.isMismatch && now - mismatchSince >= MISMATCH_RESEND_MS
     const storedSeq = ps.seq
     if (pauseSeqSkipUntil - now > PAUSE_SEQ_RETRY_MS) pauseSeqSkipUntil = 0 // 時鐘往回跳：不讓退讓期間被拉長
     const pauseSeq = now < pauseSeqSkipUntil ? undefined : storedSeq
@@ -736,7 +720,7 @@ export async function tick($: EngineInterface, force = false) {
     const resumeToken = !cur.isPaused && typeof storedToken === 'string' && storedToken !== '' ? storedToken : ''
     // paused 和序號不吻合（別的對話按到一半，或是舊版對話只改了 paused）：先不送「繼續」，等吻合了帶對的序號送；
     // 暫停照送（沒序號，中繼一律收，寧可多暫停）
-    const isResumePending = !cur.isPaused && !ps.isMismatch && (resumeToken !== '' || needsResume)
+    const isResumePending = !cur.isPaused && (!ps.isMismatch || isMismatchStale) && (resumeToken !== '' || needsResume)
     const body = statusBody(cur, conn, sentActivity, isResumePending, pauseSeq)
     // 要在送出「之前」就記：逾時、5xx、回應丟失的 paused: true 照樣可能已經到了中繼（而且可能比別的對話的 paused: false 晚到）
     if (body.paused === true) needsResume = true
@@ -809,8 +793,37 @@ export async function tick($: EngineInterface, force = false) {
     if (!isSameMember(currentMembership, m)) return
     if (body.action) sentActivity = JSON.stringify({ action: body.action, subject: body.subject })
     if (body.version) isVersionSent = true
-    if (body.paused === false && !isSeqDropped) needsResume = false
-    if (body.paused === false && !isSeqDropped && resumeToken !== '' && (await $.store.get('resumePending')) === resumeToken) await $.store.delete('resumePending')
+    // 0.6.0：中繼的回應帶自己的暫停狀態（paused、pauseSeq）。有的話，「繼續」要中繼確認過（已繼續、序號跟上）才算送達；
+    // 舊中繼沒有這兩個欄位＝照 0.5.8 的老辦法（200，且不是拿掉序號送的）就算
+    const relayPause = typeof data.paused === 'boolean' && Number.isSafeInteger(data.pauseSeq) && data.pauseSeq >= 0
+      && data.pauseSeq < 2 ** 52 // 再大就當回應異常（+1 會超出安全整數）
+      ? { isPaused: data.paused as boolean, seq: data.pauseSeq as number } : undefined
+    let isDelivered = !isSeqDropped
+    if (relayPause && body.paused === false) isDelivered = !relayPause.isPaused && (storedSeq === undefined || relayPause.seq >= storedSeq)
+    if (body.paused === false && isDelivered) needsResume = false
+    if (body.paused === false && isDelivered && resumeToken !== '' && (await $.store.get('resumePending')) === resumeToken) await $.store.delete('resumePending')
+    // 本機（吻合、有序號）和中繼對不上時：暫停優先、序號大的算
+    if (relayPause && pauseSeq !== undefined && !ps.isMismatch && relayPause.isPaused === ps.isPaused) pauseBumps = 0
+    if (relayPause && pauseSeq !== undefined && !ps.isMismatch && relayPause.isPaused !== ps.isPaused) {
+      if (!ps.isPaused && relayPause.seq > pauseSeq) {
+        // 我的「繼續」被忽略、中繼上有序號更大的暫停（比我的繼續新）：跟著暫停（使用者再按一次繼續就是更新的序號）
+        await adoptRelayPause($, ps, relayPause.seq)
+      } else if (!ps.isPaused) {
+        // 中繼還沒跟上我的繼續（序號比較舊），或序號相同（沒帶序號的暫停——0.5.7 以前的對話按的——不改序號，
+        // 相同不代表比較新，不能當成使用者的新暫停去推翻他按的繼續）：記號留著，照現在的序號再送，等舊對話自己的繼續生效
+        needsResume = true
+      } else if (relayPause.seq >= pauseSeq && pauseBumps < PAUSE_BUMPS_MAX) {
+        // 我的暫停被當舊的忽略（中繼上有序號 ≥ 我的繼續）：序號加到比它大，當場再送一次，不等下一輪。
+        // 連續加了好幾次中繼還是不接受（壞掉或惡意的中繼）就不再加，免得每輪多送一個請求
+        const next = relayPause.seq + 1
+        if (await bumpPauseSeq($, ps, next)) {
+          pauseBumps += 1
+          try { await send({ ...out, paused: true, pauseSeq: next }) } catch { /* 下一輪會用新序號再送 */ }
+        }
+      }
+    }
+    // 不吻合已經超過 15 秒（舊版對話只改了 paused）、本機是繼續、中繼卻還是暫停：沒有任何記號也要補送一次沒序號的繼續
+    if (relayPause?.isPaused && ps.isMismatch && !ps.isPaused && isMismatchStale) needsResume = true
     // 送出去的期間又換了頭像（setAvatar 把旗子放下、但那次 tick 因為 isBusy 沒跑）：store 跟送出的不一樣就下一輪再送
     if (out.avatar && !isAvatarRejected) isAvatarSent = (await $.store.get('avatar')) === out.avatar
     lastPushed = signature
@@ -1009,6 +1022,24 @@ async function readPauseState($: EngineInterface): Promise<{ isPaused: boolean; 
   return { isPaused, seq: isSeq(seq) ? seq : undefined, isMismatch: false }
 }
 
+/** 把 pauseState 的序號換成 seq（paused 值不變）；這段時間使用者又按過暫停／繼續（store 變了）就不動，回傳有沒有改 */
+async function bumpPauseSeq($: EngineInterface, seen: { isPaused: boolean; seq: number | undefined }, seq: number): Promise<boolean> {
+  const cur = await readPauseState($)
+  if (cur.isMismatch || cur.isPaused !== seen.isPaused || cur.seq !== seen.seq) return false
+  await $.store.set('pauseState', { paused: seen.isPaused, seq })
+  return true
+}
+
+/** 中繼確認的暫停比本機的繼續新：本機改成暫停（先寫 paused 再寫 pauseState，跟 setPaused 同順序），繼續記號作廢 */
+async function adoptRelayPause($: EngineInterface, seen: { isPaused: boolean; seq: number | undefined }, seq: number) {
+  const cur = await readPauseState($)
+  if (cur.isMismatch || cur.isPaused !== seen.isPaused || cur.seq !== seen.seq) return
+  await $.store.set('paused', true)
+  await $.store.set('pauseState', { paused: true, seq })
+  await $.store.delete('resumePending')
+  needsResume = false
+}
+
 async function setPaused($: EngineInterface, isPaused: boolean) {
   if (!isPaused) needsResume = true // 先記在這個對話，後面的 store 寫入失敗也不會漏送
   // 0.5.8：序號＝現在的時間，但一定比上一次大（時鐘倒退、同一毫秒按兩下都不會重複或變小）。
@@ -1060,7 +1091,11 @@ async function inviteText($: EngineInterface, l: Lang, relay: string, invite: st
   const link = inviteLink(origin, invite)
   try {
     const answer = await $.ui.ask(s.askInstalled, { header: s.askInstalledHeader, options: [s.installedYes, s.installedNo, s.installedNoOther] })
-    if (answer === s.installedYes) return { text: joinLine(link), toast: s.copied }
+    if (answer === s.installedYes) {
+      // CHAT-6：聊天準備好了就複製 wf1: 邀請（帶群主身分和這份邀請專屬的秘密，只貼進對方的 pane）；否則照舊的 /friends join 連結
+      const wf1 = await chatInviteText($, origin, invite)
+      return wf1 ? { text: wf1, toast: s.copied } : { text: joinLine(link), toast: s.copied }
+    }
     if (answer === s.installedNo) return { text: s.installMessage, toast: s.copiedInstallOnly }
     if (answer === s.installedNoOther) return { text: t(nextLang(l)).installMessage, toast: s.copiedInstallOnly }
     return null
@@ -1093,6 +1128,7 @@ async function forgetGroup($: EngineInterface, m: Membership): Promise<boolean> 
     void tick($, true)
     return false
   }
+  await chatWipe($) // 離開或被移出：聊天金鑰一起刪（CHAT-6）
   await setGroup($, undefined)
   await update($, friends, () => [])
   return true
@@ -1260,6 +1296,7 @@ export async function removeMember($: EngineInterface, m: Membership, memberId: 
   try {
     const r = await relayCall($, m.relay, 'POST', '/kick', { memberId }, m)
     relayAccepted = true
+    await chatNoteRemoved(memberId)
     await checkpoint()
     if (!(await saveRotatedInvite($, m, r))) return 'uncertain'
     await update($, friends, rows => rows.filter(f => f.id !== memberId))
@@ -1344,10 +1381,11 @@ async function createGroup($: EngineInterface, relay: string, name: string, grou
   await $.store.set('onboarded', true)
   await $.store.delete('removedNotice')
   await update($, removed, () => false)
+  await chatProvision($, mem)
   await setGroup($, mem)
 }
 
-async function joinGroup($: EngineInterface, parsed: { relay: string; invite: string }, name: string) {
+async function joinGroup($: EngineInterface, parsed: { relay: string; invite: string; wf1?: Wf1Invite }, name: string) {
   await assertNotInGroup($)
   const r = await relayCall($, parsed.relay, 'POST', '/join', { invite: parsed.invite, name })
   const mem = membershipFrom(r, parsed.relay, name)
@@ -1364,10 +1402,12 @@ async function joinGroup($: EngineInterface, parsed: { relay: string; invite: st
   await $.store.set('onboarded', true)
   await $.store.delete('removedNotice')
   await update($, removed, () => false)
+  await chatProvision($, mem, parsed.wf1)
   await setGroup($, mem)
 }
 
 export const register: Register = on => {
+  registerChat(on)
   on('session.start', async ($, e, next) => {
     const l = await storedLang($)
     await update($, lang, () => l)
@@ -1397,6 +1437,8 @@ export const register: Register = on => {
       void $.ui.open({ id: PANE, title: t(l).title, focus: true })
     }
     void autoUpdateCheck($)
+    setChatVersion(await ownVersion($))
+    chatSessionStart($)
     return next(e)
   })
 
@@ -1410,6 +1452,7 @@ export const register: Register = on => {
       // 只收掉這個對話的連線；同一人別的對話還開著就還在線
       if (m) await relayCall($, m.relay, 'POST', '/status', { state: 'offline', conn }, m)
     } catch { /* 中繼 150 秒後自己判離線 */ }
+    await chatSessionEnd($)
     return next(e)
   })
 
@@ -1419,6 +1462,7 @@ export const register: Register = on => {
       isPaneOpen = false
       void closeWhatsNew($)
     }
+    chatPaneClosed(e.id)
     return next(e)
   }).catch(($, e, next) => next(e)) // 出錯也一定讓 pane 關得掉
 
@@ -1482,7 +1526,7 @@ export const register: Register = on => {
           // sec-14：先擋，不問名字、不打中繼
           if (m) { await setGroup($, m); return { text: s.alreadyInGroup } }
           const [invite, ...nameParts] = rest
-          const parsed = invite ? parseInvite(invite, relay) : null
+          const parsed = invite ? parseInvite(invite, relay) : null // 指令不收 wf1:（參數會進對話）
           if (!parsed) return { text: s.usageJoin }
           // sec-15：不安全的中繼先擋，不問名字（relayCall 也會擋，這裡只是早一步）
           if (!isSecureRelay(parsed.relay)) return { text: s.relayError(-3) }
@@ -1651,6 +1695,8 @@ export const register: Register = on => {
     const lastFail = failureOf(await $.store.get('updateFail'))
     const wn = await read($, whatsNew)
     const wasRemoved = await read($, removed)
+    // CHAT-4W：聊天按鈕上只放未讀「數字」，聊天的任何文字都不讀到這裡（chat4-iso-design R3）
+    const chatUnread = (await read($, chatAtom)).unread
     const isAutoUpdate = (await $.store.get('autoUpdate')) === true
     await read($, demoHiddenView) // R6-02：訂閱，按「隱藏示範」或打 /friends demo off|on 時 pane 會重畫；實際值每次從 store 讀
     const isDemoHidden = (await $.store.get('demoHidden')) === true
@@ -1721,7 +1767,7 @@ export const register: Register = on => {
           const diagText = buildDiagnostics(input) + (failNow !== null ? '\nupdate-failure: ' + reasonCode(failNow) : '')
           const r = await $.ui.copy({ text: diagText, surface: press.surface })
           const l2 = await read($, lang)
-          $.ui.toast(r.isCopied ? diagStrings(l2).copied : diagStrings(l2).copyFailed)
+          $.ui.toast(diagToast(l2, diagWho(!!g, g?.isOwner), r.isCopied))
         })()
       }} />
     )
@@ -1810,7 +1856,7 @@ export const register: Register = on => {
       const submitInvite = async (value: string) => {
         const s2 = t(await read($, lang))
         const relay = ((await $.store.get('relay')) as string | undefined) ?? DEFAULT_RELAY
-        const parsed = parseInvite(value.trim(), relay)
+        const parsed = parseInvite(value.trim(), relay, { allowWf1: true })
         if (!parsed) { $.ui.toast(s2.badInvite); return }
         if (!isSecureRelay(parsed.relay)) { $.ui.toast(s2.error(s2.relayError(-3))); return }
         // sec-14：別的對話可能已經加入群組了（store 共用），這個 pane 還沒換畫面：先擋、不問名字，並換成群組畫面
@@ -1978,6 +2024,11 @@ export const register: Register = on => {
         })()
       }} />
     )
+    const chatButton = (
+      <Button key="chat-open" label={CHAT_STRINGS[l].tabChatName(chatUnread)} onPress={() => { void $.ui.open({ id: CHAT_PANE_ID, title: CHAT_STRINGS[l].tabChat, focus: true }) }}>
+        <Text>{CHAT_STRINGS[l].tabChat + (chatUnread > 0 ? ' ' + formatUnreadBadge(chatUnread) : '')}</Text>
+      </Button>
+    )
     const header = (
       <Box flexDirection="row" justifyContent="space-between" gap={1}>
         <Box flexDirection="row" gap={1} flexShrink={1}>
@@ -2046,8 +2097,7 @@ export const register: Register = on => {
             {list.length === 0 && <Text dimColor>{s.loading}</Text>}
             {isAlone && <Text dimColor>{s.alone}</Text>}
             {shownFeed.map(f => {
-              const when = f.action !== '' ? ago(f.activityAgoSec, l) : ''
-              const third = [f.action !== '' ? subjectLabel(f.subject) : '', s.presence[f.presence], oldTag(f)].filter(Boolean).join(' · ')
+              const third = [f.action !== '' ? subjectLabel(f.subject) : '', busyLine(f.presence, f.action !== '', f.activityAgoSec, l) ?? s.presence[f.presence], oldTag(f)].filter(Boolean).join(' · ')
               return (
                 <Box key={f.id} flexDirection="row" gap={1} marginTop={1}>
                   {avatar(f, 36)}
@@ -2055,7 +2105,6 @@ export const register: Register = on => {
                     <Box flexDirection="row" justifyContent="space-between" gap={1}>
                       <Text bold wrap="truncate-end">{f.name}</Text>
                       <Box flexDirection="row" gap={1}>
-                        {when !== '' && <Text dimColor>{when}</Text>}
                         {g.isOwner && !isDemoBot(f) && <Button key={'remove-' + f.id} label={s.removeButton} onPress={() => { void pressRemove(f) }} />}
                       </Box>
                     </Box>
@@ -2089,6 +2138,7 @@ export const register: Register = on => {
             <Box flexDirection="row" gap={1} marginTop={1}>
               {pauseButton}
               {inviteButton}
+              {chatButton}
             </Box>
             <Box flexDirection="row" gap={1} marginTop={1}>
               {avatarButton}
@@ -2145,7 +2195,7 @@ export const register: Register = on => {
           {/* ui-26：終端機按鈕列只留 4 個（5 個在英文約 79 欄會擠爆），換頭像用 /friends avatar；好友的頭像照樣畫在名字前（表情符號） */}
           {leaveButton}
         </Box>
-        <Box flexDirection="row" gap={1}>{nameButton}{diagButton}</Box>
+        <Box flexDirection="row" gap={1}>{nameButton}{diagButton}{chatButton}</Box>
         <Box flexDirection="column" marginTop={1}>
           {sorted.length === 0 && <Text dimColor>{s.loading}</Text>}
           {isAlone && <Text dimColor>{s.alone}</Text>}
@@ -2154,13 +2204,10 @@ export const register: Register = on => {
               <Text color={COLOR[f.presence]}>●</Text>
               {avatarOf(f) && <Text>{AVATAR_EMOJI[avatarOf(f)!]}</Text>}
               <Text bold wrap="truncate-end">{f.name}{f.isMe ? s.you : ''}</Text>
-              <Text dimColor>{s.presence[f.presence]}</Text>
+              <Text dimColor>{busyLine(f.presence, f.action !== '', f.activityAgoSec, l) ?? s.presence[f.presence]}</Text>
               {f.presence !== 'offline' && f.action !== '' && <Text dimColor>—</Text>}
               {f.presence !== 'offline' && f.action !== '' && (
                 <Text wrap="truncate-end">{activityText(f.action, f.subject, l)}</Text>
-              )}
-              {f.presence !== 'offline' && f.action !== '' && (
-                <Text dimColor>{ago(f.activityAgoSec, l)}</Text>
               )}
               {oldTag(f) !== '' && <Text dimColor>· {oldTag(f)}</Text>}
               {g.isOwner && !isDemoBot(f) && <Button key={'remove-term-' + f.id} label={s.removeButton} onPress={() => { void pressRemove(f, true) }} />}

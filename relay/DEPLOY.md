@@ -5,7 +5,7 @@ official relay run by the project's developer. If you would rather keep your gro
 Cloudflare account, one person (usually whoever creates the group) deploys their own relay once;
 everyone else just needs the URL.
 
-**Cost:** $0 on Cloudflare's free plan for a group of up to 10 people.
+**Cost:** $0 on Cloudflare's free plan for a group of up to 5 people.
 **Time:** about 5 minutes.
 
 ## What the relay stores
@@ -37,7 +37,7 @@ You need [Node.js](https://nodejs.org) 22.18 or newer (wrangler needs Node 22, a
    `npx wrangler login --device`: it prints a link and a short code to enter there.
 3. Deploy:
    ```bash
-   npx wrangler deploy
+   npm run deploy
    ```
    If your account doesn't have a workers.dev subdomain yet, wrangler asks you to register one.
    At the end, wrangler prints your relay URL, such as
@@ -45,7 +45,7 @@ You need [Node.js](https://nodejs.org) 22.18 or newer (wrangler needs Node 22, a
    once more, so the plugin copy on your relay points at your relay:
    ```bash
    node build_plugin.mjs --no-guide --no-app --base https://friends-status-relay.<your-subdomain>.workers.dev
-   npx wrangler deploy
+   npm run deploy
    ```
 4. Check it's up: open `<your relay URL>/health` in a browser. You should see `{"ok":true}`.
 
@@ -82,9 +82,24 @@ claude plugin install with-friends@with-friends
 
 When you change the plugin, raise `version` in `mod/.claude-plugin/plugin.json` before you build again.
 
+## Chat switch (plugin 0.6.0 and later)
+
+Chat is **off** on a new relay. With the switch off, the relay tells plugins (`GET /capability`) that chat is not available
+and refuses every chat route, so friends see no chat tab. Only the exact value `1` turns it on; anything else (unset, `0`,
+`true`) leaves it off. Use a Worker **secret**, not a plain variable, so a later `npm run deploy` doesn't reset it:
+
+```bash
+npx wrangler secret put FRIENDS_CHAT_ENABLED   # type 1 when asked
+```
+
+Check it: `<your relay URL>/capability` shows `"enabled":true`. Plugins notice the change within 5 minutes. To turn chat off
+again, run `npx wrangler secret delete FRIENDS_CHAT_ENABLED`; plugins hide chat within 10 minutes and need no update. Each member
+can use up to 5 devices for chat. Running the Node relay (`relay/server.mjs`) instead? Set the environment variable
+`FRIENDS_CHAT_ENABLED=1` before starting it.
+
 ## Limits
 
-- **10 people per group.** That keeps typical use under a third of the free plan's
+- **5 people per group.** That keeps typical use under a sixth of the free plan's
   daily quota, with room for busy days. For bigger groups, upgrade the Cloudflare plan
   ([Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)).
 - If the free daily quota runs out, the relay stops answering until the next day (UTC).

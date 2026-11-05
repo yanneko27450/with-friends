@@ -261,6 +261,9 @@ try {
     const modSrc = join(here, '..', '..', 'mod')
     mkdirSync(join(root, 'relay', 'worker'), { recursive: true })
     cpSync(join(here, 'build_plugin.mjs'), join(root, 'relay', 'worker', 'build_plugin.mjs'))
+    mkdirSync(join(root, 'relay', 'worker', 'src'), { recursive: true })
+    cpSync(join(here, '..', 'server.mjs'), join(root, 'relay', 'server.mjs'))
+    cpSync(join(here, 'src', 'index.mjs'), join(root, 'relay', 'worker', 'src', 'index.mjs'))
     cpSync(join(modSrc, 'hooks'), join(root, 'mod', 'hooks'), { recursive: true })
     cpSync(join(modSrc, 'types', 'index.d.ts'), join(root, 'mod', 'types', 'index.d.ts'))
     const manifest = JSON.parse(readFileSync(join(modSrc, '.claude-plugin', 'plugin.json'), 'utf8'))
@@ -301,7 +304,7 @@ try {
       rmSync(ok.root, { recursive: true, force: true })
     }
     // 測試建置（更新測試用）：plugin.json 版本跟 changelog.ts 對不上也要能建
-    const t = buildCopy('9.9.9')
+    const t = buildCopy('0.5.77')
     try {
       const outDir = join(t.root, 'testout')
       const r = t.run(['--out', outDir, '--version', '1.2.3'])
@@ -310,6 +313,95 @@ try {
     } finally {
       rmSync(t.root, { recursive: true, force: true })
     }
+  })
+  // CHAT-5 發版鎖：有聊天的版本（0.6.0 起）要兩個中繼都有 GET /capability 才產 zip
+  const MARKER = String.fromCharCode(10) + "// 'GET /capability'" + String.fromCharCode(10)
+  // has：哪些中繼原始碼有 /capability（'node' = relay/server.mjs、'worker' = relay/worker/src/index.mjs）
+  const prepare = (version, has) => {
+    const b = buildCopy(version)
+    const changelog = join(b.root, 'mod', 'hooks', 'changelog.ts')
+    writeFileSync(changelog, readFileSync(changelog, 'utf8').replace(`version: '${CHANGELOG[0].version}'`, `version: '${version}'`))
+    const files = { node: join(b.root, 'relay', 'server.mjs'), worker: join(b.root, 'relay', 'worker', 'src', 'index.mjs') }
+    for (const [name, file] of Object.entries(files)) {
+      const text = readFileSync(file, 'utf8').replaceAll('GET /capability', 'GET /removed')
+      writeFileSync(file, has.includes(name) ? text + MARKER : text)
+    }
+    return b
+  }
+  // 命令列裡的代號：PUBLIC＝relay/worker/public、PUBLIC/sub＝它的子資料夾、PUBLIC:upper＝全大寫（Windows 不分大小寫）、
+  // PUBLIC:extended＝Windows 的長路徑前綴寫法、ELSEWHERE＝別的資料夾
+  const BS = String.fromCharCode(92)
+  const resolveToken = b => x => x === 'PUBLIC' ? b.pub
+    : x === 'PUBLIC/sub' ? join(b.pub, 'sub')
+    : x === 'PUBLIC:upper' ? b.pub.toUpperCase()
+    : x === 'PUBLIC:extended' ? BS + BS + '?' + BS + b.pub
+    : x === 'ELSEWHERE' ? join(b.root, 'elsewhere')
+    : x
+  const expectBlocked = (version, has, extra = []) => {
+    const b = prepare(version, has)
+    try {
+      const r = b.run(extra.map(resolveToken(b)))
+      assert.equal(r.ok, false, `${version} has=${has} ${extra} 應該被擋`)
+      assert.match(r.stderr, /GET \/capability/)
+      assert.ok(!existsSync(b.pub) || readdirSync(b.pub).length === 0, '不能產出任何東西')
+    } finally {
+      rmSync(b.root, { recursive: true, force: true })
+    }
+  }
+  const expectBuilt = (version, has, extra = []) => {
+    const b = prepare(version, has)
+    try {
+      const r = b.run(extra.map(resolveToken(b)))
+      assert.equal(r.ok, true, r.stderr)
+    } finally {
+      rmSync(b.root, { recursive: true, force: true })
+    }
+  }
+  await check('發版鎖：0.6.0 起，兩個中繼都沒有 / 只有一邊有 GET /capability → 不產 zip（Node 缺、Worker 缺都要擋）', () => {
+    expectBlocked('0.6.0', [])
+    expectBlocked('0.6.0', ['node'])
+    expectBlocked('0.6.0', ['worker'])
+  })
+  await check('發版鎖：中繼原始碼檔案不見了（找不到就無法確認）也擋', () => {
+    for (const rel of [['relay', 'server.mjs'], ['relay', 'worker', 'src', 'index.mjs']]) {
+      const b = prepare('0.6.0', ['node', 'worker'])
+      try {
+        rmSync(join(b.root, ...rel))
+        const r = b.run([])
+        assert.equal(r.ok, false, rel.join('/') + ' 不見了要擋')
+        assert.match(r.stderr, /GET .capability/)
+      } finally {
+        rmSync(b.root, { recursive: true, force: true })
+      }
+    }
+  })
+  await check('發版鎖：更高的版本也擋（0.7.0、0.10.0、1.0.0），讀不出版本（0.x）也擋', () => {
+    for (const version of ['0.7.0', '0.10.0', '1.0.0', '0.x', 'v1.0.0', 'x.5.0']) expectBlocked(version, [])
+  })
+  await check('發版鎖：兩邊都有 GET /capability 就能建；0.5.x 不受限', () => {
+    expectBuilt('0.6.0', ['node', 'worker'])
+    expectBuilt('0.5.8', [])
+    expectBuilt('0.5.99', [])
+  })
+  await check('發版鎖：只看真實版本——不管 --out 寫成什麼樣子（public、子資料夾、大小寫、長路徑前綴、別的資料夾），也不管 --version 寫什麼，0.6.0 的程式碼都不能出', () => {
+    expectBlocked('0.6.0', [], ['--out', 'PUBLIC'])
+    expectBlocked('0.6.0', [], ['--out', 'PUBLIC/sub'])
+    expectBlocked('0.6.0', [], ['--out', 'PUBLIC', '--version', '0.5.99'])
+    expectBlocked('0.6.0', [], ['--out', 'PUBLIC/sub', '--version', '0.5.99'])
+    expectBlocked('0.6.0', [], ['--out', 'ELSEWHERE'])
+    expectBlocked('0.6.0', [], ['--out', 'ELSEWHERE', '--version', '0.5.99'])
+    if (process.platform === 'win32') {
+      expectBlocked('0.6.0', [], ['--out', 'PUBLIC:upper'])
+      expectBlocked('0.6.0', [], ['--out', 'PUBLIC:extended'])
+    }
+    // 兩邊都有 /capability 就都能建
+    expectBuilt('0.6.0', ['node', 'worker'], ['--out', 'PUBLIC'])
+    expectBuilt('0.6.0', ['node', 'worker'], ['--out', 'ELSEWHERE', '--version', '0.6.1'])
+  })
+  await check('發版鎖：0.5.x 的程式碼不受限——測試建置可以用 --version 標成更高的版本（更新測試要用）', () => {
+    expectBuilt('0.5.8', [], ['--out', 'ELSEWHERE', '--version', '0.9.9'])
+    expectBuilt('0.5.8', [], ['--out', 'PUBLIC', '--version', '0.6.1'])
+    expectBuilt('0.5.8', [], ['--out', 'ELSEWHERE'])
   })
 } finally {
   rmSync(out, { recursive: true, force: true })
